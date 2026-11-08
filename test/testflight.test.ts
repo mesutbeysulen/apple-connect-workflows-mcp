@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { distributeBuild, type TestFlightAPI } from '../src/testflight.js';
 import type { Account } from '../src/config.js';
+import { withContract } from './helpers.js';
 const account: Account = { name: 'team', issuerId: '11111111-1111-4111-8111-111111111111', keyId: 'ABCDEFGHIJ', privateKeyPath: '/unused', readOnly: false, allowedAppIds: ['123'] };
 function fixture() {
   let processingState = 'VALID'; let groupApp = '123'; let existing = false; let calls = 0;
@@ -11,7 +12,7 @@ function fixture() {
     list: async () => ({ data: existing ? [{ id: 'build-1', type: 'builds', attributes: {} }] : [], truncated: false }),
     request: async (_method, _path, body) => { calls++; assert.deepEqual(body, { data: [{ type: 'builds', id: 'build-1' }] }); return {}; },
   };
-  return { api, get calls() { return calls; }, setState: (s: string) => processingState = s, setGroupApp: (s: string) => groupApp = s, setExisting: () => existing = true };
+  return { api: withContract(api), get calls() { return calls; }, setState: (s: string) => processingState = s, setGroupApp: (s: string) => groupApp = s, setExisting: () => existing = true };
 }
 test('distributes a ready build to a group in the same app', async () => {
   const f = fixture();

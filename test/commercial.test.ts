@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { createIap, createSubscription, createSubscriptionGroup, localizeProduct, setAppPrice, setIapPrice, setSubscriptionPrice } from '../src/commercial.js';
-import { downloadSales, downloadAnalytics, requestAnalytics, mergeTsv, reportPeriods } from '../src/reports.js';
+import { downloadSales, downloadAnalytics, requestAnalytics, ReportSpool, reportPeriods } from '../src/reports.js';
 import { AppleError } from '../src/apple.js';
 import { account, readOnly, res, fakeApi } from './helpers.js';
 
@@ -30,6 +30,7 @@ test('product creation is idempotent and validated', async () => {
   await assert.rejects(createIap({ account: readOnly, appId: '123', productId: 'x', name: 'X', type: 'CONSUMABLE' }, f.api), /read-only/);
   assert.equal((await createSubscriptionGroup({ account, appId: '123', referenceName: 'Pro' }, f.api)).status, 'exists');
   assert.equal((await createSubscription({ account, appId: '123', groupId: 'g1', productId: 'pro.month', name: 'Pro', period: 'ONE_MONTH' }, f.api)).status, 'exists');
+  await assert.rejects(createSubscription({ account, appId: '123', groupId: 'g1', productId: 'p', name: 'P', period: 'ONE_MONTH', groupLevel: NaN }, f.api), /positive integer/);
   await assert.rejects(createSubscription({ account, appId: '123', groupId: 'other', productId: 'p', name: 'P', period: 'ONE_MONTH' }, f.api), /does not belong/);
   assert.equal(f.writes().length, 1);
 });
@@ -65,10 +66,34 @@ test('prices preview by default, match exactly and write only with execute', asy
   await assert.rejects(setIapPrice({ account, appId: '123', iapId: 'stranger', territory: 'USA', price: '1.99' }, f.api), /does not belong/);
   await assert.rejects(setAppPrice({ account, appId: '123', territory: 'usa', price: '1' }, f.api), /territory/);
 });
-test('merges reports with differing columns and drops footers', () => {
-  const { text, rows } = mergeTsv([{ source: 'd1', text: 'A\tB\n1\t2\nTotal_Rows\n' }, { source: 'd2', text: 'B\tC\n3\t4\n' }], 'period');
-  assert.equal(rows, 2);
-  assert.equal(text, 'period\tA\tB\tC\nd1\t1\t2\t\nd2\t\t3\t4\n');
+test('price output records what it replaces, and subscription retries do not duplicate', async () => {
+  const f = fakeApi(shop({
+    '/v1/apps/123/appPriceSchedule': res('sch', 'appPriceSchedules'),
+    '/v1/appPriceSchedules/sch/manualPrices': [res('mp', 'appPrices', { manual: true, startDate: '2026-01-01' }, { territory: { data: { id: 'TUR', type: 'territories' } }, appPricePoint: { data: { id: 'old-point', type: 'appPricePoints' } } })],
+    '/v1/subscriptions/sub1/prices': [res('sp', 'subscriptionPrices', { startDate: '2027-01-01' }, { subscriptionPricePoint: { data: { id: 'sub-999', type: 'subscriptionPricePoints' } } })],
+  }));
+  const preview = await setAppPrice({ account: readOnly, appId: '123', territory: 'USA', price: '4.99' }, f.api);
+  assert.deepEqual(preview.current, [{ id: 'mp', manual: true, startDate: '2026-01-01', endDate: null, territory: 'TUR', pricePointId: 'old-point' }]);
+  const none = await setIapPrice({ account: readOnly, appId: '123', iapId: 'iap1', territory: 'USA', price: '1.99' }, f.api);
+  assert.deepEqual(none.current, []);
+  const again = await setSubscriptionPrice({ account, appId: '123', subscriptionId: 'sub1', territory: 'USA', price: '9.99', startDate: '2027-01-01', execute: true }, f.api);
+  assert.equal(again.status, 'exists'); assert.equal(again.result, 'sp');
+  assert.equal(f.writes().length, 0);
+  assert.equal((await setSubscriptionPrice({ account, appId: '123', subscriptionId: 'sub1', territory: 'USA', price: '9.99', startDate: '2027-02-01', execute: true }, f.api)).status, 'created');
+  assert.equal(f.writes().length, 1);
+});
+test('merges reports with differing columns and drops footers', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'spool-')); const out = join(dir, 'm.tsv');
+  const spool = await ReportSpool.open(out, 'period');
+  try {
+    await spool.add('d1', Buffer.from('A\tB\n1\t2\nTotal_Rows\n'));
+    await spool.add('d2', gzipSync('B\tC\n3\t4\n'));
+    await spool.add('empty', Buffer.from(''));
+    assert.equal(await spool.write(out), 2);
+    assert.equal(readFileSync(out, 'utf8'), 'period\tA\tB\tC\nd1\t1\t2\t\nd2\t\t3\t4\n');
+    await spool.close();
+    assert.deepEqual(readdirSync(dir), ['m.tsv']);
+  } finally { rmSync(dir, { recursive: true }); }
 });
 test('report periods follow the frequency and are bounded', () => {
   assert.deepEqual(reportPeriods('DAILY', '2026-01-30', '2026-02-01'), ['2026-01-30', '2026-01-31', '2026-02-01']);
@@ -94,7 +119,38 @@ test('sales download merges days, records missing periods and fails on real erro
     assert.equal(statSync(out).mode & 0o777, 0o600);
     assert(paths[0]!.includes('filter%5BvendorNumber%5D=85'));
     await assert.rejects(downloadSales({ ...input, from: '2026-02-02', to: '2026-02-02' }, api), /403/);
+    // Earlier days survive a later failure in a separate file, and the real output stays intact.
+    const before = readFileSync(out, 'utf8');
+    await assert.rejects(downloadSales({ ...input, from: '2026-02-01', to: '2026-02-02' }, api), /1 earlier period\(s\) saved/);
+    assert.match(readFileSync(`${out}.partial`, 'utf8'), /2026-02-01\tcoins\t3/);
+    assert.equal(readFileSync(out, 'utf8'), before);
+    // A range Apple has not published must not overwrite an earlier file.
+    const none = await downloadSales({ ...input, from: '2026-01-02', to: '2026-01-02' }, api);
+    assert.equal(none.out, null); assert.equal(none.rows, 0);
+    assert.equal(readFileSync(out, 'utf8'), before);
+    assert.deepEqual(readdirSync(dir).sort(), ['sales.tsv', 'sales.tsv.partial']);
     await assert.rejects(downloadSales({ ...input, out: 'relative.tsv' }, api), /absolute/);
+  } finally { rmSync(dir, { recursive: true }); }
+});
+test('overlapping report requests do not double count', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'analytics-')); const out = join(dir, 'a.tsv');
+  const body = gzipSync('Date\tCount\n2026-01-01\t5\n');
+  const f = fakeApi({
+    '/v1/apps/123/analyticsReportRequests': [res('snap', 'analyticsReportRequests', { accessType: 'ONE_TIME_SNAPSHOT' }), res('live', 'analyticsReportRequests', { accessType: 'ONGOING' })],
+    '/v1/analyticsReportRequests/snap/reports': [res('r1', 'analyticsReports', { name: 'Downloads' })],
+    '/v1/analyticsReportRequests/live/reports': [res('r2', 'analyticsReports', { name: 'Downloads' })],
+    '/v1/analyticsReports/r1/instances': [res('i1', 'x', { processingDate: '2026-01-01' }), res('old', 'x', { processingDate: '2025-06-01' })],
+    '/v1/analyticsReports/r2/instances': [res('i2', 'x', { processingDate: '2026-01-01' })],
+    '/v1/analyticsReportInstances/i1/segments': [res('s1', 'x', { url: 'https://a.apple.com/1' })],
+    '/v1/analyticsReportInstances/i2/segments': [res('s2', 'x', { url: 'https://a.apple.com/2' })],
+    '/v1/analyticsReportInstances/old/segments': [res('s3', 'x', { url: 'https://a.apple.com/3' })],
+  });
+  const fetcher = (async () => new Response(body)) as unknown as typeof fetch;
+  try {
+    const result = await downloadAnalytics({ appId: '123', reportName: 'Downloads', granularity: 'DAILY', out }, { ...f.api, download: async () => Buffer.alloc(0) }, fetcher);
+    assert.deepEqual(result.instances, ['i2', 'old']);
+    assert.equal(result.overlappingInstancesSkipped, 1);
+    assert.equal(result.rows, 2);
   } finally { rmSync(dir, { recursive: true }); }
 });
 test('analytics downloads verify checksums, send no credentials and filter by date', async () => {

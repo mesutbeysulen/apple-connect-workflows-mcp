@@ -1,4 +1,5 @@
-import type { Resource } from './apple.js';
+import { AppleError, type Resource } from './apple.js';
+import { validId } from './apple-rules.js';
 
 export interface BuildStatusAPI { get(path: string): Promise<Resource> }
 export interface BuildStatus {
@@ -9,7 +10,7 @@ const TERMINAL_BUILD = new Set(['VALID', 'INVALID', 'FAILED']);
 
 /** Reads the upload and, once Apple links it, the processed build's processingState. */
 export async function buildStatus(api: BuildStatusAPI, uploadId: string): Promise<BuildStatus> {
-  if (!/^[A-Za-z0-9-]{1,128}$/.test(uploadId)) throw new Error('Invalid build upload ID.');
+  if (!validId(uploadId)) throw new Error('Invalid build upload ID.');
   const upload = await api.get(`/v1/buildUploads/${uploadId}?include=build`);
   const state = upload.attributes.state as { state?: string; errors?: unknown[] } | undefined;
   const uploadState = String(state?.state ?? 'UNKNOWN');
@@ -25,7 +26,7 @@ export async function buildStatus(api: BuildStatusAPI, uploadId: string): Promis
 
 /** Polls until the build is VALID/INVALID/FAILED or the upload fails. Read-only. */
 export async function waitForBuild(api: BuildStatusAPI, uploadId: string, options: {
-  timeoutMs?: number; intervalMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number; onProgress?: (status: BuildStatus) => void;
+  timeoutMs?: number; intervalMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number; onProgress?: (status: BuildStatus) => void; onRetry?: (error: unknown) => void;
 } = {}): Promise<BuildStatus> {
   const { timeoutMs = 60 * 60_000, intervalMs = 30_000, now = Date.now } = options;
   const sleep = options.sleep ?? (ms => new Promise<void>(r => setTimeout(r, ms)));
@@ -33,7 +34,16 @@ export async function waitForBuild(api: BuildStatusAPI, uploadId: string, option
   const deadline = now() + timeoutMs;
   let last = '';
   for (;;) {
-    const status = await buildStatus(api, uploadId);
+    let status: BuildStatus;
+    try { status = await buildStatus(api, uploadId); }
+    catch (error) {
+      // Client errors are final; a network blip or Apple outage must not end a long wait.
+      const final = error instanceof AppleError && error.status >= 400 && error.status < 500 && error.status !== 429;
+      if (final || now() + intervalMs > deadline) throw error;
+      options.onRetry?.(error);
+      await sleep(intervalMs);
+      continue;
+    }
     const key = `${status.uploadState}/${status.processingState}`;
     if (key !== last) { options.onProgress?.(status); last = key; }
     if (status.done) return status;

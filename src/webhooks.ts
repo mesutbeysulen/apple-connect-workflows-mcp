@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { requireWrite, type Account } from './config.js';
 import type { Resource } from './apple.js';
+import { validId } from './apple-rules.js';
 import type { PlanStore } from './plans.js';
 
 export interface WebhookAPI {
@@ -18,14 +19,13 @@ export function webhookSecret(env: NodeJS.ProcessEnv = process.env): string {
   if (!secret || secret.length < 16) throw new Error(`Set ${WEBHOOK_SECRET_ENV} to a secret of at least 16 characters.`);
   return secret;
 }
-const validId = (id: string) => /^[A-Za-z0-9-]{1,128}$/.test(id);
 async function ownedWebhook(api: WebhookAPI, appId: string, webhookId: string): Promise<Resource> {
   const hooks = await api.list(`/v1/apps/${appId}/webhooks?limit=200`, 200);
   const hook = hooks.data.find(row => row.id === webhookId);
   if (!hook) throw new Error('Webhook does not belong to this app.');
   return hook;
 }
-export async function createWebhook(input: { account: Account; appId: string; name: string; url: string; events: string[]; secret: string }, api: WebhookAPI): Promise<{ status: 'exists' | 'created'; webhookId: string }> {
+export async function createWebhook(input: { account: Account; appId: string; name: string; url: string; events: string[]; secret: string }, api: WebhookAPI): Promise<{ status: 'secret_updated' | 'created'; webhookId: string }> {
   const { account, appId, name, url, events, secret } = input;
   requireWrite(account, appId);
   const target = new URL(url);
@@ -33,7 +33,11 @@ export async function createWebhook(input: { account: Account; appId: string; na
   if (!name || name.length > 128 || !events.length || !events.every(e => /^[A-Z_]{3,100}$/.test(e))) throw new Error('Provide a name and at least one Apple webhook event type.');
   const hooks = await api.list(`/v1/apps/${appId}/webhooks?limit=200`, 200);
   const found = hooks.data.find(row => row.attributes.name === name && row.attributes.url === target.toString());
-  if (found) return { status: 'exists', webhookId: found.id };
+  if (found) {
+    // Apple never returns the secret, so it is reapplied; rotation would otherwise silently break the receiver.
+    await api.patch(`/v1/webhooks/${found.id}`, 'webhooks', found.id, { secret });
+    return { status: 'secret_updated', webhookId: found.id };
+  }
   const created = await api.post('/v1/webhooks', { data: { type: 'webhooks', attributes: { name, url: target.toString(), eventTypes: events, secret, enabled: true }, relationships: { app: { data: { type: 'apps', id: appId } } } } });
   return { status: 'created', webhookId: created.id };
 }

@@ -7,12 +7,16 @@ import { z } from 'zod';
 const absolutePath = z.string().refine(isAbsolute, 'Use an absolute path');
 export const accountSchema = z.object({
   name: z.string().regex(/^[a-zA-Z0-9_-]+$/),
-  issuerId: z.string().uuid(),
+  /** Team keys need an issuer. Individual keys have none and act with their owner's own access. */
+  keyType: z.enum(['team', 'individual']).default('team'),
+  issuerId: z.string().uuid().optional(),
   keyId: z.string().regex(/^[A-Za-z0-9]{10}$/),
   privateKeyPath: absolutePath,
   readOnly: z.boolean().default(true),
   allowedAppIds: z.array(z.string().regex(/^\d+$/)).default([]),
-}).strict();
+  /** Lets reviewed api-apply plans run. Off by default because a generic plan cannot prove which app it affects. */
+  genericWrites: z.boolean().default(false),
+}).strict().refine(a => a.keyType === 'individual' ? a.issuerId === undefined : a.issuerId !== undefined, 'Team keys need issuerId; individual keys must not set it.');
 export const CAPABILITIES = ['upload', 'review', 'release', 'commercial', 'admin'] as const;
 export type Capability = typeof CAPABILITIES[number];
 export const operatorSchema = z.object({
@@ -33,7 +37,11 @@ export function loadConfig(path = process.env.APPLE_CONNECT_CONFIG): Config {
   return configSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
 }
 export function accountIdentity(account: Account): string {
-  return createHash('sha256').update(`${account.issuerId}:${account.keyId}`).digest('hex');
+  return createHash('sha256').update(`${account.issuerId ?? 'individual'}:${account.keyId}`).digest('hex');
+}
+/** For account-level resources such as bundle IDs, which belong to no single app. */
+export function requireAccountWrite(account: Account): void {
+  if (account.readOnly) throw new Error('Account is read-only. Enable writes in local configuration first.');
 }
 export function requireWrite(account: Account, appId: string): void {
   if (account.readOnly) throw new Error('Account is read-only. Enable writes in local configuration first.');

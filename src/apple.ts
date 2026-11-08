@@ -14,6 +14,8 @@ export interface AppleAPI {
   get(path: string): Promise<Resource>;
   list(path: string, limit?: number): Promise<{ data: Resource[]; truncated: boolean }>;
   patch(path: string, type: string, id: string, attributes: Record<string, unknown>): Promise<unknown>;
+  /** Binary or vendor-typed reads such as performance metrics. */
+  download?(path: string, accept: string): Promise<Buffer>;
 }
 export type Method = 'GET' | 'PATCH' | 'POST' | 'DELETE';
 export function createTokenProvider(account: Account): () => string {
@@ -27,7 +29,8 @@ export function createTokenProvider(account: Account): () => string {
     }
     const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
     const expires = now + 600;
-    const input = `${encode({ alg: 'ES256', kid: account.keyId, typ: 'JWT' })}.${encode({ iss: account.issuerId, iat: now, exp: expires, aud: 'appstoreconnect-v1' })}`;
+    const claims = account.keyType === 'individual' ? { sub: 'user' } : { iss: account.issuerId };
+    const input = `${encode({ alg: 'ES256', kid: account.keyId, typ: 'JWT' })}.${encode({ ...claims, iat: now, exp: expires, aud: 'appstoreconnect-v1' })}`;
     const signature = sign('sha256', Buffer.from(input), { key, dsaEncoding: 'ieee-p1363' }).toString('base64url');
     cached = { token: `${input}.${signature}`, expires };
     return cached.token;
@@ -52,15 +55,15 @@ export class AppleClient implements AppleAPI {
     }
     return url;
   }
-  async request(method: Method, path: string, body?: unknown): Promise<any> {
+  /** Sends one call. Only reads retry on 429/5xx: a mutation's outcome may already exist remotely. */
+  private async send(method: Method, path: string, accept: string, timeoutMs: number, body?: unknown): Promise<Response> {
     const url = this.url(path);
     for (let attempt = 0; ; attempt++) {
       const response = await this.fetcher(url, {
-        method, redirect: 'error', signal: AbortSignal.timeout(20_000),
-        headers: { authorization: `Bearer ${this.token()}`, accept: 'application/json', ...(body ? { 'content-type': 'application/json' } : {}) },
+        method, redirect: 'error', signal: AbortSignal.timeout(timeoutMs),
+        headers: { authorization: `Bearer ${this.token()}`, accept, ...(body ? { 'content-type': 'application/json' } : {}) },
         body: body ? JSON.stringify(body) : undefined,
       });
-      // Mutations are never blindly retried: their outcome may already exist remotely.
       if (method === 'GET' && (response.status === 429 || response.status >= 500) && attempt < 2) {
         const retry = response.headers.get('retry-after');
         const seconds = retry === null ? 2 ** attempt : Number(retry);
@@ -73,20 +76,16 @@ export class AppleClient implements AppleAPI {
         const data = await response.json().catch(() => ({})) as { errors?: { code?: string }[] };
         throw new AppleError(response.status, (data.errors ?? []).map(e => e.code ?? '').filter(Boolean));
       }
-      if (response.status === 204) return {};
-      return response.json();
+      return response;
     }
   }
-  /** Reads a binary API response (e.g. gzip sales reports) with the same origin and credential rules. */
+  async request(method: Method, path: string, body?: unknown): Promise<any> {
+    const response = await this.send(method, path, 'application/json', 20_000, body);
+    return response.status === 204 ? {} : response.json();
+  }
+  /** Reads a binary API response (e.g. gzip sales reports) under the same origin, credential and retry rules. */
   async download(path: string, accept: string): Promise<Buffer> {
-    const url = this.url(path);
-    const response = await this.fetcher(url, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(120_000),
-      headers: { authorization: `Bearer ${this.token()}`, accept } });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({})) as { errors?: { code?: string }[] };
-      throw new AppleError(response.status, (data.errors ?? []).map(e => e.code ?? '').filter(Boolean));
-    }
-    return Buffer.from(await response.arrayBuffer());
+    return Buffer.from(await (await this.send('GET', path, accept, 120_000)).arrayBuffer());
   }
   async post(path: string, body: unknown): Promise<Resource> { return (await this.request('POST', path, body)).data; }
   async delete(path: string): Promise<void> { await this.request('DELETE', path); }

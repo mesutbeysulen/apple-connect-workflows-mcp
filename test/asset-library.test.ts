@@ -9,10 +9,11 @@ import { cleanupStaleAssets } from '../src/asset-cleanup.js';
 import { PlanStore } from '../src/plans.js';
 import { AppleError, type Resource } from '../src/apple.js';
 import { accountIdentity, type Account } from '../src/config.js';
+import { assertContract } from './helpers.js';
 
 const account: Account = { name: 'team', issuerId: '11111111-1111-4111-8111-111111111111', keyId: 'ABCDEFGHIJ', privateKeyPath: '/unused', readOnly: false, allowedAppIds: ['123'] };
 const png = Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), Buffer.from('example')]);
-const res = (id: string, type: string, attributes: Record<string, unknown> = {}): Resource => ({ id, type, attributes });
+const res = (id: string, type: string, attributes: Record<string, unknown> = {}, relationships?: Resource['relationships']): Resource => ({ id, type, attributes, ...(relationships ? { relationships } : {}) });
 type Call = { method: string; path: string; body?: unknown };
 
 /** In-memory Apple double for one app, version, localization and asset library. */
@@ -25,15 +26,16 @@ function fakeApple(options: { imageState?: string; failPlacement?: number } = {}
   const uploadOperations = [{ method: 'PUT', url: 'https://store-1.blobstore.apple.com/up?sig=x', offset: 0, length: png.length, requestHeaders: [{ name: 'Content-Type', value: 'image/png' }] }];
   const api: AssetAPI & ScreenshotSetAPI = {
     get: async path => {
+      assertContract('GET', path);
       calls.push({ method: 'GET', path });
-      if (path === '/v1/appStoreVersions/version/app') return res('123', 'apps');
-      if (path === '/v1/appStoreVersions/version') return res('version', 'appStoreVersions', { appStoreState: 'PREPARE_FOR_SUBMISSION' });
+      if (path === '/v1/appStoreVersions/version?include=app') return res('version', 'appStoreVersions', { appStoreState: 'PREPARE_FOR_SUBMISSION' }, { app: { data: { id: '123', type: 'apps' } } });
       if (path === '/v1/apps/123/assetLibrary') return res('lib-1', 'appAssetLibraries');
       const image = images.get(path.split('/').at(-1)!);
       if (path.startsWith('/v1/appAssetLibraryImages/') && image) return image;
       throw new AppleError(404, []);
     },
     list: async path => {
+      assertContract('GET', path);
       calls.push({ method: 'LIST', path });
       if (path.includes('/appStoreVersionLocalizations?')) return { data: [res('loc', 'appStoreVersionLocalizations')], truncated: false };
       if (path.includes('/appScreenshotSets?')) return { data: [res('set-1', 'appScreenshotSets', { screenshotDisplayType: 'APP_IPHONE_65' })], truncated: false };
@@ -52,6 +54,7 @@ function fakeApple(options: { imageState?: string; failPlacement?: number } = {}
       throw new Error(`unexpected list ${path}`);
     },
     post: async (path, body) => {
+      assertContract('POST', path, body);
       calls.push({ method: 'POST', path, body });
       const data = (body as { data: { attributes: Record<string, unknown>; relationships: Record<string, { data: unknown }> } }).data;
       if (path === '/v1/appAssetLibraryImages') {
@@ -74,14 +77,15 @@ function fakeApple(options: { imageState?: string; failPlacement?: number } = {}
       if (path === '/v1/appScreenshotSets') return res('set-new', 'appScreenshotSets', data.attributes);
       throw new Error(`unexpected post ${path}`);
     },
-    patch: async (path, _type, id, attrs) => {
+    patch: async (path, type, id, attrs) => {
+      assertContract('PATCH', path, { data: { type, id, attributes: attrs } });
       calls.push({ method: 'PATCH', path, body: attrs });
       const image = images.get(id)!;
       images.set(id, { ...image, attributes: { ...image.attributes, state: 'UPLOAD_COMPLETE', uploadOperations: undefined } });
       return {};
     },
-    delete: async path => { calls.push({ method: 'DELETE', path }); images.delete(path.split('/').at(-1)!); },
-    request: async (method, path, body) => { calls.push({ method, path, body }); return {}; },
+    delete: async path => { assertContract('DELETE', path); calls.push({ method: 'DELETE', path }); images.delete(path.split('/').at(-1)!); },
+    request: async (method, path, body) => { assertContract(method, path, body); calls.push({ method, path, body }); return {}; },
   };
   const puts: Buffer[] = [];
   const fetcher = (async (_url: string, init: RequestInit) => {
@@ -212,6 +216,38 @@ test('cleanup is a dry run by default, skips recent or placed images and re-chec
   assert.deepEqual(f.calls.filter(c => c.method === 'DELETE').map(c => c.path), ['/v1/appAssetLibraryImages/stale']);
 });
 
+test('cleanup archives what Apple refuses to delete and keeps journals in step', async () => {
+  const f = fakeApple();
+  const store = new PlanStore(':memory:');
+  const old = new Date(Date.now() - 48 * 3_600_000).toISOString();
+  f.images.set('stuck', res('stuck', 'appAssetLibraryImages', { state: 'AWAITING_UPLOAD', createdDate: old }));
+  store.saveCreative({ id: 'stuck', kind: 'image', account: 'team', identity: accountIdentity(account), appId: '123', filePath: '/x.png', sha256: 'h', size: 1, createdAt: 0, status: 'needs_reconciliation', error: null });
+  const api: AssetAPI = { ...f.api, delete: async () => { throw new AppleError(409, []); }, patch: async (path, _t, _i, attrs) => { f.calls.push({ method: 'PATCH', path, body: attrs }); return {}; } };
+  try {
+    const run = await cleanupStaleAssets({ account, appId: '123', execute: true }, api, store);
+    assert.deepEqual(run.archived, ['stuck']); assert.deepEqual(run.deleted, []);
+    assert.deepEqual(f.calls.at(-1)!.body, { archived: true });
+    assert.equal(store.creative('stuck').status, 'archived');
+    await assert.rejects((await import('../src/creative-assets.js')).resumeCreative('stuck', account, store, api), /archived by asset-cleanup/);
+  } finally { store.close(); }
+});
+test('cleanup preview leaves the local journal untouched', async () => {
+  const f = fakeApple();
+  const store = new PlanStore(':memory:');
+  store.saveScreenshot({ account: 'team', identity: accountIdentity(account), appId: '123', versionId: 'v', localizationId: 'l', setId: 's', filePath: '/x.png', sha256: 'h', error: null, id: 'gone-remote', createdAt: Date.now() - 48 * 3_600_000, status: 'reserved' });
+  const api: AssetAPI = { ...f.api, get: async path => { if (path.startsWith('/v1/appScreenshots/')) throw new AppleError(404, []); return f.api.get(path); } };
+  try {
+    const preview = await cleanupStaleAssets({ account, appId: '123' }, api, store);
+    assert.equal(store.screenshot('gone-remote').status, 'reserved');
+    assert(preview.skipped.some(s => s.id === 'gone-remote'));
+    await cleanupStaleAssets({ account, appId: '123', execute: true }, api, store);
+    assert.equal(store.screenshot('gone-remote').status, 'gone');
+  } finally { store.close(); }
+});
+test('asset library lookup explains a missing library', async () => {
+  const { assetLibraryId } = await import('../src/asset-library.js');
+  await assert.rejects(assetLibraryId({ get: async () => null as never }, '123'), /no asset library/);
+});
 test('cleanup includes only journaled legacy screenshots that are stale and old', async () => {
   const f = fakeApple();
   const store = new PlanStore(':memory:');

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { uploadCreative, resumeCreative, submitCreatives, placeCreative, removeCreativePlacement, imageInfo, parseTargets, creativeOverview } from '../src/creative-assets.js';
 import { PlanStore } from '../src/plans.js';
+import { AppleError } from '../src/apple.js';
 import { account, readOnly, res, fakeApi, png } from './helpers.js';
 
 const specs = [res('ref', 'appAssetLibraryRefData', { imageSpecs: [
@@ -91,8 +92,7 @@ test('interrupted upload resumes without another reservation and refuses changed
 
 const routes = (versionState: string, assetState: string, existing: unknown[] = []) => ({
   '/v1/apps/123/assetLibrary': res('lib', 'appAssetLibraries'),
-  '/v1/appStoreVersions/v/app': res('123', 'apps'),
-  '/v1/appStoreVersions/v': res('v', 'appStoreVersions', { appStoreState: versionState }),
+  '/v1/appStoreVersions/v': res('v', 'appStoreVersions', { appStoreState: versionState }, { app: { data: { id: '123', type: 'apps' } } }),
   '/v1/appStoreVersions/v/appStoreVersionLocalizations': [res('loc', 'appStoreVersionLocalizations', { locale: 'tr' })],
   '/v1/appAssetLibraries/lib/images': (path: string) => new URL(path, 'https://x').searchParams.get('filter[id]') === 'img' ? [res('img', 'appAssetLibraryImages', { state: assetState })] : [],
   '/v1/appStoreVersionLocalizations/loc/placements': existing as never,
@@ -112,18 +112,42 @@ test('placing is idempotent and never replaces without an explicit flag', async 
   const same = fakeApi(routes('PREPARE_FOR_SUBMISSION', 'APPROVED', [res('p1', 'appAssetLibraryPlacements', {}, { image: { data: { id: 'img', type: 'appAssetLibraryImages' } } })]));
   assert.equal((await placeCreative({ ...place, targets: ['header'] }, same.api)).placements[0]!.status, 'exists');
   assert.equal(same.writes().length, 0);
-  const other = () => fakeApi(routes('PREPARE_FOR_SUBMISSION', 'APPROVED', [res('old', 'appAssetLibraryPlacements', {}, { image: { data: { id: 'other', type: 'appAssetLibraryImages' } } })]));
+  const old = res('old', 'appAssetLibraryPlacements', { placementGroup: 'G1' }, { image: { data: { id: 'other', type: 'appAssetLibraryImages' } } });
+  const other = () => fakeApi(routes('PREPARE_FOR_SUBMISSION', 'APPROVED', [old]));
   const blocked = other();
   await assert.rejects(placeCreative({ ...place, targets: ['header'] }, blocked.api), /--replace/);
   assert.equal(blocked.writes().length, 0);
   const swap = other();
   const result = await placeCreative({ ...place, targets: ['header'], replace: true }, swap.api);
-  assert.deepEqual(swap.writes().map(w => w.method), ['DELETE', 'POST']);
+  assert.deepEqual(swap.writes().map(w => w.method), ['POST', 'DELETE']);
   assert.deepEqual(result.placements[0]!.replaced, ['old']);
 });
-test('placement failure after replace names what was removed', async () => {
-  const f = fakeApi(routes('PREPARE_FOR_SUBMISSION', 'APPROVED', [res('old', 'appAssetLibraryPlacements')]), { post: () => { throw new Error('Apple said no.'); } });
-  await assert.rejects(placeCreative({ ...place, targets: ['header'], replace: true }, f.api), /Apple said no\. Removed placements before this failure: old/);
+const linkedRow = (id: string, asset: string, placementGroup = 'G1') => res(id, 'appAssetLibraryPlacements', { placementGroup }, { image: { data: { id: asset, type: 'appAssetLibraryImages' } } });
+test('a group limit falls back to swap, and failure restores the previous asset', async () => {
+  let posts = 0;
+  const limit = fakeApi(routes('PREPARE_FOR_SUBMISSION', 'APPROVED', [linkedRow('old', 'other')]), { post: () => { if (++posts === 1) throw new AppleError(409, []); return res('p2', 'appAssetLibraryPlacements'); } });
+  const swapped = await placeCreative({ ...place, targets: ['header'], replace: true }, limit.api);
+  assert.equal(swapped.placements[0]!.placementId, 'p2');
+  assert.deepEqual(limit.writes().map(w => w.method), ['POST', 'DELETE', 'POST']);
+  let attempts = 0;
+  const restored = fakeApi(routes('PREPARE_FOR_SUBMISSION', 'APPROVED', [linkedRow('old', 'other')]), { post: () => { if (++attempts <= 2) throw new AppleError(409, []); return res('back', 'appAssetLibraryPlacements'); } });
+  await assert.rejects(placeCreative({ ...place, targets: ['header'], replace: true }, restored.api), /Previous assets were restored/);
+  assert.equal((restored.writes().at(-1)!.body as any).data.relationships.image.data.id, 'other');
+  assert.equal((restored.writes().at(-1)!.body as any).data.attributes.placementGroup, 'G1');
+  const lost = fakeApi(routes('PREPARE_FOR_SUBMISSION', 'APPROVED', [linkedRow('old', 'other')]), { post: () => { throw new AppleError(409, []); } });
+  await assert.rejects(placeCreative({ ...place, targets: ['header'], replace: true }, lost.api), /place them again: image other/);
+});
+test('an uncertain placement failure never removes the live asset', async () => {
+  const f = fakeApi(routes('PREPARE_FOR_SUBMISSION', 'APPROVED', [linkedRow('old', 'other')]), { post: () => { throw new Error('socket hang up'); } });
+  await assert.rejects(placeCreative({ ...place, targets: ['header'], replace: true }, f.api), /socket hang up/);
+  assert.equal(f.writes().some(w => w.method === 'DELETE'), false);
+});
+test('replace refuses unidentified assets and needs a group when several variants exist', async () => {
+  const unknown = fakeApi(routes('PREPARE_FOR_SUBMISSION', 'APPROVED', [res('old', 'appAssetLibraryPlacements')]));
+  await assert.rejects(placeCreative({ ...place, targets: ['header'], replace: true }, unknown.api), /Could not identify/);
+  const many = fakeApi(routes('PREPARE_FOR_SUBMISSION', 'APPROVED', [linkedRow('a', 'x', 'IPHONE'), linkedRow('b', 'y', 'IPAD')]));
+  await assert.rejects(placeCreative({ ...place, targets: ['header'], replace: true }, many.api), /2 placements across groups \(IPHONE, IPAD\)/);
+  assert.equal(unknown.writes().length + many.writes().length, 0);
 });
 test('approved versions accept only approved assets; foreign and failed assets are refused', async () => {
   const live = fakeApi(routes('READY_FOR_SALE', 'PREPARE_FOR_SUBMISSION'));
@@ -143,6 +167,9 @@ test('standalone creative review submits exactly the requested asset', async () 
   assert.deepEqual(f.writes().map(w => w.path), ['/v1/reviewSubmissions', '/v1/reviewSubmissionItems', '/v1/reviewSubmissions/new-id']);
   assert.equal((f.writes()[1]!.body as any).data.relationships.appAssetLibraryImage.data.id, 'img');
   assert.deepEqual(f.writes()[2]!.body, { submitted: true });
+  const dup = fakeApi({ ...routes('READY_FOR_SALE', 'PREPARE_FOR_SUBMISSION'), '/v1/reviewSubmissions/new-id': res('new-id', 'reviewSubmissions', {}) });
+  await submitCreatives({ account, appId: '123', imageIds: ['img', 'img'] }, dup.api);
+  assert.equal(dup.writes().filter(w => w.path === '/v1/reviewSubmissionItems').length, 1);
   const rejected = fakeApi(routes('READY_FOR_SALE', 'REJECTED'));
   await assert.rejects(submitCreatives({ account, appId: '123', imageIds: ['img'] }, rejected.api), /cannot be submitted/);
 });

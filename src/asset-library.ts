@@ -1,7 +1,8 @@
 import { accountIdentity, requireWrite, type Account } from './config.js';
 import type { Resource } from './apple.js';
 import type { AssetJob, PlanStore } from './plans.js';
-import { readImage, rereadImage, sendParts, validId, verifyLocalization } from './screenshots.js';
+import { validGroup, validId } from './apple-rules.js';
+import { readImage, rereadImage, sendParts, verifyLocalization } from './screenshots.js';
 
 /** Apple client surface used by Asset Library workflows (App Store Connect API 4.6+). */
 export interface AssetAPI {
@@ -13,8 +14,6 @@ export interface AssetAPI {
 }
 export const IMAGE_PLACEMENT_TYPES = ['APP_SCREENSHOT', 'IMESSAGE_APP_SCREENSHOT'] as const;
 export type ImagePlacementType = typeof IMAGE_PLACEMENT_TYPES[number];
-/** Placement groups come from Apple (existing placements or appAssetLibraryRefData); only the shape is checked locally. */
-export const validGroup = (group: string) => /^[A-Za-z0-9_.-]{1,64}$/.test(group);
 export const imageState = (resource: Resource) => String(resource.attributes.state ?? 'UNKNOWN');
 const stateDetails = (resource: Resource) => {
   const details = resource.attributes.stateDetails;
@@ -25,7 +24,7 @@ const UPLOADED_STATES = new Set(['UPLOAD_COMPLETE', 'COMPLETE', 'PREPARE_FOR_SUB
 export async function assetLibraryId(api: Pick<AssetAPI, 'get'>, appId: string): Promise<string> {
   if (!validId(appId)) throw new Error('Invalid app ID.');
   const library = await api.get(`/v1/apps/${appId}/assetLibrary`);
-  if (library.type !== 'appAssetLibraries' || !library.id || !validId(library.id)) throw new Error('Apple returned no asset library for this app.');
+  if (library?.type !== 'appAssetLibraries' || !library.id || !validId(library.id)) throw new Error('Apple returned no asset library for this app.');
   return library.id;
 }
 export interface AssetUploadInput {

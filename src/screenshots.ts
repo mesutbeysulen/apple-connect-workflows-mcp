@@ -4,6 +4,8 @@ import { basename, isAbsolute } from 'node:path';
 import { accountIdentity, requireWrite, type Account } from './config.js';
 import { PlanStore, type ScreenshotJob } from './plans.js';
 import { AppleClient, createTokenProvider, type Resource } from './apple.js';
+import { EDITABLE_VERSION_STATES, validId, versionOfApp } from './apple-rules.js';
+import { validateOperations } from './upload-transfer.js';
 
 export interface ScreenshotAPI {
   get(path: string): Promise<Resource>;
@@ -11,24 +13,7 @@ export interface ScreenshotAPI {
   post(path: string, body: unknown): Promise<Resource>;
   patch(path: string, type: string, id: string, attributes: Record<string, unknown>): Promise<unknown>;
 }
-export const EDITABLE_VERSION_STATES = ['PREPARE_FOR_SUBMISSION', 'INVALID_BINARY', 'REJECTED', 'METADATA_REJECTED', 'DEVELOPER_REJECTED'];
 export const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
-export const validId = (id: string) => /^[A-Za-z0-9-]{1,128}$/.test(id);
-interface UploadOperation { method: string; url: string; offset: number; length: number; requestHeaders: { name: string; value: string }[] }
-export function validateOperations(input: unknown, length: number): UploadOperation[] {
-  if (!Array.isArray(input) || !input.length) throw new Error('Apple provided no upload operations.');
-  const operations = input as UploadOperation[];
-  let position = 0;
-  for (const op of [...operations].sort((a, b) => a.offset - b.offset)) {
-    const url = new URL(op.url);
-    if (url.protocol !== 'https:' || url.username || url.password || !url.hostname.endsWith('.apple.com')) throw new Error('Unsafe Apple upload URL.');
-    if (op.method !== 'PUT' || !Number.isSafeInteger(op.offset) || !Number.isSafeInteger(op.length) || op.length <= 0 || op.offset !== position) throw new Error('Invalid upload byte ranges.');
-    if (!Array.isArray(op.requestHeaders) || op.requestHeaders.some(h => /^(authorization|cookie|host)$/i.test(h.name))) throw new Error('Unsafe upload headers.');
-    position += op.length;
-  }
-  if (position !== length) throw new Error('Upload instructions do not cover the whole file.');
-  return operations;
-}
 /** Sends every validated byte range to Apple's signed URLs. Never forwards API credentials. */
 export async function sendParts(operations: unknown, bytes: Buffer, fetcher: typeof fetch): Promise<void> {
   for (const op of validateOperations(operations, bytes.length)) {
@@ -64,14 +49,16 @@ export async function rereadImage(filePath: string, sha256: string): Promise<Buf
   if (createHash('sha256').update(bytes).digest('hex') !== sha256) throw new Error('Source image changed; cannot resume upload.');
   return bytes;
 }
+/** Confirms the version belongs to the app and can still be edited. */
+export async function verifyEditableVersion(api: Pick<ScreenshotAPI, 'get'>, appId: string, versionId: string): Promise<void> {
+  const version = await versionOfApp(api, appId, versionId);
+  const state = version.attributes.appStoreState;
+  if (!EDITABLE_VERSION_STATES.includes(String(state))) throw new Error(`Version is not editable: ${state}`);
+}
 /** Confirms version→app ownership, editable state and that the localization belongs to the version. */
 export async function verifyLocalization(api: Pick<ScreenshotAPI, 'get' | 'list'>, appId: string, versionId: string, localizationId: string): Promise<void> {
   if (![appId, versionId, localizationId].every(validId)) throw new Error('Invalid app, version or localization ID.');
-  const app = await api.get(`/v1/appStoreVersions/${versionId}/app`);
-  if (app.id !== appId) throw new Error('Version does not belong to the requested app.');
-  const version = await api.get(`/v1/appStoreVersions/${versionId}`);
-  const state = version.attributes.appStoreState;
-  if (!EDITABLE_VERSION_STATES.includes(String(state))) throw new Error(`Version is not editable: ${state}`);
+  await verifyEditableVersion(api, appId, versionId);
   const localizations = await api.list(`/v1/appStoreVersions/${versionId}/appStoreVersionLocalizations?limit=200`, 2000);
   if (localizations.truncated || !localizations.data.some(row => row.id === localizationId)) throw new Error('Localization is not verified for this version.');
 }

@@ -1,12 +1,12 @@
 import { requireWrite, type Account } from './config.js';
 import type { Resource } from './apple.js';
+import { validId } from './apple-rules.js';
 
 export interface TestFlightAPI {
   get(path: string): Promise<Resource>;
   list(path: string, limit?: number): Promise<{ data: Resource[]; truncated: boolean }>;
   request(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown>;
 }
-const validId = (id: string) => /^[A-Za-z0-9-]{1,128}$/.test(id);
 export async function distributeBuild(
   input: { account: Account; appId: string; buildId: string; groupId: string },
   api: TestFlightAPI,

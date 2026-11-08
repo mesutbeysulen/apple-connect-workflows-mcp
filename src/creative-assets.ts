@@ -5,8 +5,10 @@ import { basename, extname, isAbsolute } from 'node:path';
 import { accountIdentity, requireWrite, type Account } from './config.js';
 import { AppleError, type Resource } from './apple.js';
 import type { CreativeJob, PlanStore } from './plans.js';
-import { assetLibraryId, imageState, validGroup, type AssetAPI } from './asset-library.js';
-import { EDITABLE_VERSION_STATES, validId, validateOperations } from './screenshots.js';
+import { assetLibraryId, imageState, type AssetAPI } from './asset-library.js';
+import { EDITABLE_VERSION_STATES, validGroup, validId, versionOfApp } from './apple-rules.js';
+import { putFilePart, validateOperations } from './upload-transfer.js';
+import { verifyLocalization } from './screenshots.js';
 import { submitForReview, type ReviewAPI, type ReviewItem, type ReviewResult } from './review.js';
 
 /** Header and Search Results placements (iOS 27 / iPadOS 27 product page creative assets). */
@@ -15,7 +17,6 @@ export type CreativeTarget = keyof typeof CREATIVE_PLACEMENTS;
 export type CreativeKind = 'image' | 'video';
 const RESOURCE = { image: 'appAssetLibraryImages', video: 'appAssetLibraryVideos' } as const;
 const COLLECTION = { image: 'images', video: 'videos' } as const;
-const RELATION = { image: 'image', video: 'video' } as const;
 const NEVER_PLACEABLE = new Set(['AWAITING_UPLOAD', 'FAILED', 'REJECTED', 'ARCHIVED']);
 const SUBMITTABLE = new Set(['PREPARE_FOR_SUBMISSION', 'READY_FOR_REVIEW']);
 
@@ -121,15 +122,41 @@ export async function uploadCreative(input: { account: Account; appId: string; t
       if (list.length && !list.some(s => file.size <= (s.maxFileSize ?? Infinity) && extensionOk(s, file.name))) throw new Error(`Video type or size does not fit ${target}. Apple specs: ${describe(list)}`);
     }
   }
+  return { ...await reserveAndSend(input, file, 'CREATIVE_ASSETS', api, fetcher, store), specCheck };
+}
+async function reserveAndSend(input: { account: Account; appId: string; referenceName?: string; previewFrameTimeCode?: string; filePath: string }, file: Awaited<ReturnType<typeof inspect>>, category: string,
+  api: AssetAPI, fetcher: typeof fetch, store?: PlanStore): Promise<Omit<CreativeUploadResult, 'specCheck'>> {
+  const { account, appId, referenceName, previewFrameTimeCode, filePath } = input;
   const libraryId = await assetLibraryId(api, appId);
   const reserved = await api.post(`/v1/${RESOURCE[file.kind]}`, { data: { type: RESOURCE[file.kind],
-    attributes: { category: 'CREATIVE_ASSETS', fileName: file.name, fileSize: file.size, ...(referenceName ? { referenceName } : {}), ...(previewFrameTimeCode ? { previewFrameTimeCode } : {}) },
+    attributes: { category, fileName: file.name, fileSize: file.size, ...(referenceName ? { referenceName } : {}), ...(previewFrameTimeCode ? { previewFrameTimeCode } : {}) },
     relationships: { assetLibrary: { data: { type: 'appAssetLibraries', id: libraryId } } } } });
-  if (reserved.type !== RESOURCE[file.kind] || !reserved.id || !validId(reserved.id)) throw new Error('Invalid creative asset reservation response.');
+  if (reserved.type !== RESOURCE[file.kind] || !reserved.id || !validId(reserved.id)) throw new Error('Invalid asset reservation response.');
   const job: CreativeJob = { id: reserved.id, kind: file.kind, account: account.name, identity: accountIdentity(account), appId, filePath, sha256: file.sha256, size: file.size, createdAt: Date.now(), status: 'reserved', error: null };
   store?.saveCreative(job);
-  const result = await transfer(job, reserved, api, fetcher, store);
-  return { ...result, specCheck };
+  return transfer(job, reserved, api, fetcher, store);
+}
+/** Uploads an app preview video to the Asset Library. Resume it with creative-resume. */
+export async function uploadPreview(input: { account: Account; appId: string; filePath: string; referenceName?: string; previewFrameTimeCode?: string }, api: AssetAPI, fetcher: typeof fetch = fetch, store?: PlanStore): Promise<Omit<CreativeUploadResult, 'specCheck'>> {
+  requireWrite(input.account, input.appId);
+  const file = await inspect(input.filePath);
+  if (file.kind !== 'video') throw new Error('App previews must be MOV, MP4 or M4V videos.');
+  const result = await reserveAndSend(input, file, 'APP_SCREENSHOTS_AND_PREVIEWS', api, fetcher, store);
+  return { ...result, next: 'Place it with preview-place once processing allows.' };
+}
+/** Places a preview video on a version language. Rerunning finds the existing placement. */
+export async function placePreview(input: { account: Account; appId: string; versionId: string; localizationId: string; videoId: string; placementGroup: string }, api: AssetAPI): Promise<{ status: 'exists' | 'created'; placementId: string }> {
+  const { account, appId, versionId, localizationId, videoId, placementGroup } = input;
+  requireWrite(account, appId);
+  if (!validGroup(placementGroup)) throw new Error('Invalid placement group.');
+  await verifyLocalization(api, appId, versionId, localizationId);
+  const state = imageState(await libraryAsset(api, appId, 'video', videoId));
+  if (NEVER_PLACEABLE.has(state)) throw new Error(`video ${videoId} cannot be placed from state ${state}.`);
+  const query = new URLSearchParams({ 'filter[video]': videoId, 'filter[placementGroup]': placementGroup, limit: '50' });
+  const existing = (await api.list(`/v1/appStoreVersionLocalizations/${localizationId}/placements?${query}`, 50)).data[0];
+  if (existing) return { status: 'exists', placementId: existing.id };
+  const created = await api.post('/v1/appAssetLibraryPlacements', placementBody({ kind: 'video', id: videoId }, 'APP_PREVIEW', localizationId, placementGroup));
+  return { status: 'created', placementId: created.id };
 }
 async function transfer(job: CreativeJob, asset: Resource, api: AssetAPI, fetcher: typeof fetch, store?: PlanStore): Promise<Omit<CreativeUploadResult, 'specCheck'>> {
   const resource = RESOURCE[job.kind];
@@ -137,11 +164,7 @@ async function transfer(job: CreativeJob, asset: Resource, api: AssetAPI, fetche
     let current = asset;
     if (imageState(current) === 'AWAITING_UPLOAD') {
       for (const op of validateOperations(current.attributes.uploadOperations, job.size)) {
-        const response = await fetcher(op.url, { method: 'PUT', redirect: 'error', signal: AbortSignal.timeout(10 * 60_000),
-          headers: Object.fromEntries(op.requestHeaders.map(h => [h.name, h.value])),
-          body: createReadStream(job.filePath, { start: op.offset, end: op.offset + op.length - 1 }), duplex: 'half' } as unknown as RequestInit);
-        if (!response.ok) throw new Error(`Creative asset transfer failed: HTTP ${response.status}.`);
-        await response.body?.cancel();
+        await putFilePart(op, job.filePath, fetcher);
       }
       if ((await stat(job.filePath)).size !== job.size) throw new Error('Source file changed during upload.');
       store?.updateCreative(job.id, 'transferred');
@@ -163,6 +186,7 @@ export async function resumeCreative(id: string, account: Account, store: PlanSt
   const job = store.creative(id);
   if (job.account !== account.name || job.identity !== accountIdentity(account)) throw new Error('Creative job belongs to a different account identity.');
   requireWrite(account, job.appId);
+  if (job.status === 'deleted' || job.status === 'archived') throw new Error(`Creative job ${id} was ${job.status} by asset-cleanup; upload the file again.`);
   const file = await inspect(job.filePath);
   if (file.sha256 !== job.sha256) throw new Error('Source file changed; cannot resume upload.');
   return transfer(job, await api.get(`/v1/${RESOURCE[job.kind]}/${id}`), api, fetcher, store);
@@ -178,7 +202,9 @@ async function libraryAsset(api: AssetAPI, appId: string, kind: CreativeKind, id
 }
 /** Standalone creative review: needs no new app version and no placement. */
 export async function submitCreatives(input: { account: Account; appId: string; imageIds?: string[]; videoIds?: string[] }, api: AssetAPI & ReviewAPI): Promise<ReviewResult> {
-  const { account, appId, imageIds = [], videoIds = [] } = input;
+  const { account, appId } = input;
+  const imageIds = [...new Set(input.imageIds ?? [])];
+  const videoIds = [...new Set(input.videoIds ?? [])];
   requireWrite(account, appId);
   const items: ReviewItem[] = [];
   for (const [kind, ids, relation] of [['image', imageIds, 'appAssetLibraryImage'], ['video', videoIds, 'appAssetLibraryVideo']] as const) {
@@ -191,6 +217,46 @@ export async function submitCreatives(input: { account: Account; appId: string; 
   return submitForReview({ account, appId, items }, api);
 }
 export interface PlacementOutcome { target: CreativeTarget; placementId: string; status: 'exists' | 'created'; replaced: string[] }
+const linkedAsset = (row: Resource): { kind: CreativeKind; id: string } | undefined => {
+  for (const kind of ['image', 'video'] as const) {
+    const data = row.relationships?.[kind]?.data;
+    if (data && !Array.isArray(data)) return { kind, id: data.id };
+  }
+  return undefined;
+};
+const placementBody = (asset: { kind: CreativeKind; id: string }, placementType: string, localizationId: string, placementGroup?: unknown) => ({ data: { type: 'appAssetLibraryPlacements',
+  attributes: { placementType, ...(placementGroup ? { placementGroup } : {}) },
+  relationships: { [asset.kind]: { data: { type: RESOURCE[asset.kind], id: asset.id } },
+    appStoreVersionLocalization: { data: { type: 'appStoreVersionLocalizations', id: localizationId } } } } });
+/** Swaps assets so the page is not left empty: the new one is added first, and a limit refusal falls back to swap-with-restore. */
+async function replacePlacements(api: AssetAPI, existing: Resource[], asset: { kind: CreativeKind; id: string }, placementType: string, localizationId: string, placementGroup?: string): Promise<{ id: string; replaced: string[] }> {
+  const previous = existing.map(row => ({ row, asset: linkedAsset(row) }));
+  if (previous.some(p => !p.asset)) throw new Error('Could not identify the asset behind an existing placement; refusing to replace it.');
+  const created = async () => {
+    const placement = await api.post('/v1/appAssetLibraryPlacements', placementBody(asset, placementType, localizationId, placementGroup));
+    if (placement.type !== 'appAssetLibraryPlacements' || !placement.id) throw new Error('Invalid placement response.');
+    return placement.id;
+  };
+  const replaced = existing.map(row => row.id);
+  let id: string | undefined;
+  try { id = await created(); }
+  catch (error) {
+    // Only a clear refusal (e.g. a group limit) justifies removing the live asset; an unknown outcome stops here.
+    if (!(error instanceof AppleError) || error.status < 400 || error.status >= 500) throw error;
+  }
+  for (const row of existing) await api.delete(`/v1/appAssetLibraryPlacements/${row.id}`);
+  if (id) return { id, replaced };
+  try { return { id: await created(), replaced }; }
+  catch (error) {
+    const message = error instanceof Error ? error.message : 'Placement failed';
+    const lost: string[] = [];
+    for (const { row, asset: old } of previous) {
+      try { await api.post('/v1/appAssetLibraryPlacements', placementBody(old!, placementType, localizationId, row.attributes.placementGroup ?? placementGroup)); }
+      catch { lost.push(`${old!.kind} ${old!.id}`); }
+    }
+    throw new Error(`${message} ${lost.length ? `Previous assets could not be restored; place them again: ${lost.join(', ')}.` : 'Previous assets were restored.'}`);
+  }
+}
 /** Places one asset as Header and/or Search Results on a version localization. Removes nothing without replace. */
 export async function placeCreative(input: { account: Account; appId: string; versionId: string; localizationId: string; kind: CreativeKind; assetId: string; targets: CreativeTarget[]; placementGroup?: string; replace?: boolean },
   api: AssetAPI): Promise<{ assetId: string; assetState: string; placements: PlacementOutcome[] }> {
@@ -199,14 +265,14 @@ export async function placeCreative(input: { account: Account; appId: string; ve
   if (![versionId, localizationId].every(validId)) throw new Error('Invalid version or localization ID.');
   if (!targets.length) throw new Error('Choose at least one of header, search.');
   if (placementGroup !== undefined && !validGroup(placementGroup)) throw new Error('Invalid placement group.');
-  if ((await api.get(`/v1/appStoreVersions/${versionId}/app`)).id !== appId) throw new Error('Version does not belong to the requested app.');
-  const version = await api.get(`/v1/appStoreVersions/${versionId}`);
+  const version = await versionOfApp(api, appId, versionId);
   const localizations = await api.list(`/v1/appStoreVersions/${versionId}/appStoreVersionLocalizations?limit=200`, 2000);
   if (localizations.truncated || !localizations.data.some(row => row.id === localizationId)) throw new Error('Localization is not verified for this version.');
   const assetState = imageState(await libraryAsset(api, appId, kind, assetId));
   if (NEVER_PLACEABLE.has(assetState)) throw new Error(`${kind} ${assetId} cannot be placed from state ${assetState}.`);
   // Apple refuses unapproved assets on an approved parent; say so before attempting a write.
   if (!EDITABLE_VERSION_STATES.includes(String(version.attributes.appStoreState)) && assetState !== 'APPROVED') throw new Error(`Version state ${version.attributes.appStoreState} accepts only APPROVED assets; this one is ${assetState}. Use creative-submit first.`);
+  const asset = { kind, id: assetId };
   const placements: PlacementOutcome[] = [];
   for (const target of targets) {
     const placementType = CREATIVE_PLACEMENTS[target];
@@ -214,23 +280,19 @@ export async function placeCreative(input: { account: Account; appId: string; ve
     if (placementGroup) query.set('filter[placementGroup]', placementGroup);
     const existing = await api.list(`/v1/appStoreVersionLocalizations/${localizationId}/placements?${query}`, 200);
     if (existing.truncated) throw new Error('Incomplete placement list; refusing to change placements.');
-    const linked = (row: Resource) => { const data = row.relationships?.[RELATION[kind]]?.data; return data && !Array.isArray(data) ? data.id : undefined; };
-    const same = existing.data.find(row => linked(row) === assetId);
+    const same = existing.data.find(row => linkedAsset(row)?.id === assetId);
     if (same) { placements.push({ target, placementId: same.id, status: 'exists', replaced: [] }); continue; }
     if (existing.data.length && !replace) throw new Error(`${target} already has placement(s) ${existing.data.map(r => r.id).join(', ')}. Pass --replace to swap them; assets stay in Asset Library.`);
-    const replaced: string[] = [];
-    for (const row of existing.data) { await api.delete(`/v1/appAssetLibraryPlacements/${row.id}`); replaced.push(row.id); }
-    try {
-      const created = await api.post('/v1/appAssetLibraryPlacements', { data: { type: 'appAssetLibraryPlacements',
-        attributes: { placementType, ...(placementGroup ? { placementGroup } : {}) },
-        relationships: { [RELATION[kind]]: { data: { type: RESOURCE[kind], id: assetId } },
-          appStoreVersionLocalization: { data: { type: 'appStoreVersionLocalizations', id: localizationId } } } } });
-      if (created.type !== 'appAssetLibraryPlacements' || !created.id) throw new Error('Invalid placement response.');
-      placements.push({ target, placementId: created.id, status: 'created', replaced });
-    } catch (error) {
-      const message = error instanceof AppleError || error instanceof Error ? error.message : 'Placement failed';
-      throw new Error(`${message}${replaced.length ? ` Removed placements before this failure: ${replaced.join(', ')}.` : ''}`);
+    // Several placements usually mean device variants; replacing them all must be a deliberate, per-group choice.
+    if (existing.data.length > 1 && !placementGroup) throw new Error(`${target} has ${existing.data.length} placements across groups (${[...new Set(existing.data.map(r => String(r.attributes.placementGroup ?? 'none')))].join(', ')}). Pass --placement-group to choose one.`);
+    if (existing.data.length) {
+      const { id, replaced } = await replacePlacements(api, existing.data, asset, placementType, localizationId, placementGroup);
+      placements.push({ target, placementId: id, status: 'created', replaced });
+      continue;
     }
+    const created = await api.post('/v1/appAssetLibraryPlacements', placementBody(asset, placementType, localizationId, placementGroup));
+    if (created.type !== 'appAssetLibraryPlacements' || !created.id) throw new Error('Invalid placement response.');
+    placements.push({ target, placementId: created.id, status: 'created', replaced: [] });
   }
   return { assetId, assetState, placements };
 }
@@ -239,7 +301,7 @@ export async function removeCreativePlacement(input: { account: Account; appId: 
   const { account, appId, versionId, localizationId, placementId } = input;
   requireWrite(account, appId);
   if (![versionId, localizationId, placementId].every(validId)) throw new Error('Invalid version, localization or placement ID.');
-  if ((await api.get(`/v1/appStoreVersions/${versionId}/app`)).id !== appId) throw new Error('Version does not belong to the requested app.');
+  await versionOfApp(api, appId, versionId);
   const localizations = await api.list(`/v1/appStoreVersions/${versionId}/appStoreVersionLocalizations?limit=200`, 2000);
   if (localizations.truncated || !localizations.data.some(row => row.id === localizationId)) throw new Error('Localization is not verified for this version.');
   const query = new URLSearchParams({ 'filter[id]': placementId, limit: '1' });
@@ -254,11 +316,12 @@ export async function creativeOverview(api: Pick<AssetAPI, 'list'>, versionId: s
   const localizations = await api.list(`/v1/appStoreVersions/${versionId}/appStoreVersionLocalizations?limit=200`, 2000);
   const rows = [];
   for (const localization of localizations.data) {
+    const query = new URLSearchParams({ 'filter[placementType]': Object.values(CREATIVE_PLACEMENTS).join(','), include: 'image,video', limit: '200' });
+    const placements = await api.list(`/v1/appStoreVersionLocalizations/${localization.id}/placements?${query}`, 200);
     const entry: Record<string, unknown> = { localizationId: localization.id, locale: localization.attributes.locale };
     for (const [target, placementType] of Object.entries(CREATIVE_PLACEMENTS)) {
-      const query = new URLSearchParams({ 'filter[placementType]': placementType, include: 'image,video', limit: '50' });
-      const placements = await api.list(`/v1/appStoreVersionLocalizations/${localization.id}/placements?${query}`, 50);
-      entry[target] = placements.data.map(p => ({ placementId: p.id, group: p.attributes.placementGroup, state: p.attributes.state, mediaType: p.attributes.mediaType, relationships: p.relationships }));
+      entry[target] = placements.data.filter(p => p.attributes.placementType === placementType)
+        .map(p => ({ placementId: p.id, group: p.attributes.placementGroup, state: p.attributes.state, mediaType: p.attributes.mediaType, asset: linkedAsset(p) }));
     }
     rows.push(entry);
   }

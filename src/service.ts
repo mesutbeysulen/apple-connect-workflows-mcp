@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { accountIdentity, requireWrite, type Account, type Config } from './config.js';
 import { AppleClient, createTokenProvider, type AppleAPI } from './apple.js';
+import { verifyEditableVersion } from './screenshots.js';
 import { PlanStore, type Changes, type Plan, type Step } from './plans.js';
 
 export const idSchema = z.string().regex(/^[A-Za-z0-9-]+$/).max(128);
@@ -16,7 +17,6 @@ export const prepareSchema = z.object({
   localizations: z.array(z.object({ locale: z.string().min(2).max(30), changes: changesSchema }).strict()).min(1).max(50)
     .refine(rows => new Set(rows.map(x => x.locale)).size === rows.length, 'Duplicate locale'),
 }).strict();
-const EDITABLE = new Set(['PREPARE_FOR_SUBMISSION', 'METADATA_REJECTED', 'REJECTED', 'DEVELOPER_REJECTED', 'INVALID_BINARY']);
 const equal = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 export class ConnectService {
   constructor(public config: Config, public store: PlanStore,
@@ -28,12 +28,7 @@ export class ConnectService {
   }
   api(name: string): AppleAPI { return this.factory(this.account(name)); }
   accounts() { return this.config.accounts.map(a => ({ name: a.name, readOnly: a.readOnly, allowedAppIds: a.allowedAppIds, authentication: 'not_checked' })); }
-  async checkVersion(api: AppleAPI, appId: string, versionId: string): Promise<void> {
-    const app = await api.get(`/v1/appStoreVersions/${versionId}/app`);
-    if (app.id !== appId) throw new Error('Version does not belong to the requested app.');
-    const version = await api.get(`/v1/appStoreVersions/${versionId}`);
-    if (!EDITABLE.has(String(version.attributes.appStoreState))) throw new Error(`Version is not editable: ${version.attributes.appStoreState}`);
-  }
+  checkVersion(api: AppleAPI, appId: string, versionId: string): Promise<void> { return verifyEditableVersion(api, appId, versionId); }
   async prepare(input: z.infer<typeof prepareSchema>): Promise<Plan> {
     input = prepareSchema.parse(input);
     const account = this.account(input.account);

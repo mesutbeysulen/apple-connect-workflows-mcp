@@ -25,17 +25,24 @@ export interface AssetJob {
   filePath: string; sha256: string; createdAt: number;
   placementId: string | null; status: string; error: string | null;
 }
-/** Local journal of an IPA upload; doneParts holds byte offsets Apple already accepted. */
+/** A byte range Apple accepted; path identifies the upload session it was sent to. */
+export interface DonePart { offset: number; length: number; path: string }
+/** Local journal of an IPA upload. */
 export interface BuildJob {
   id: string; account: string; identity: string; appId: string; version: string; build: string;
   filePath: string; sha256: string; size: number; createdAt: number;
-  fileId: string | null; doneParts: number[]; status: string; error: string | null;
+  fileId: string | null; doneParts: DonePart[]; status: string; error: string | null;
 }
 /** Local journal of a standalone creative asset upload (no placement yet). */
 export interface CreativeJob {
   id: string; kind: 'image' | 'video'; account: string; identity: string; appId: string;
   filePath: string; sha256: string; size: number; createdAt: number; status: string; error: string | null;
 }
+/** A reviewed single API write. The digest binds approval to this exact request. */
+export interface ApiPlanBody { account: string; identity: string; appId: string; method: string; path: string; requestBody: unknown; note: string; createdAt: number; expiresAt: number }
+export interface ApiPlan { id: string; digest: string; body: ApiPlanBody; status: string; result: unknown; error: string | null }
+export interface WorkflowPlanBody { command: string; args: Record<string, string | boolean>; account: string; identity: string; files: Record<string, string>; createdAt: number; expiresAt: number; preview: unknown }
+export interface WorkflowPlan { id: string; digest: string; body: WorkflowPlanBody; status: string; result: unknown; error: string | null }
 export class PlanStore {
   private db: DatabaseSync;
   constructor(path: string) {
@@ -53,7 +60,9 @@ export class PlanStore {
       CREATE TABLE IF NOT EXISTS creative_jobs (id TEXT PRIMARY KEY, body TEXT NOT NULL, status TEXT NOT NULL, error TEXT);
       CREATE TABLE IF NOT EXISTS webhook_events (id TEXT PRIMARY KEY, received_at INTEGER NOT NULL, payload TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS audit_log (id TEXT PRIMARY KEY, at INTEGER NOT NULL, os_user TEXT NOT NULL, command TEXT NOT NULL, account TEXT, app_id TEXT, ok INTEGER NOT NULL, error TEXT);
-      CREATE TABLE IF NOT EXISTS asset_jobs (id TEXT PRIMARY KEY, body TEXT NOT NULL, placement_id TEXT, status TEXT NOT NULL, error TEXT);`);
+      CREATE TABLE IF NOT EXISTS api_plans (id TEXT PRIMARY KEY, digest TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', result TEXT, error TEXT);
+      CREATE TABLE IF NOT EXISTS asset_jobs (id TEXT PRIMARY KEY, body TEXT NOT NULL, placement_id TEXT, status TEXT NOT NULL, error TEXT);
+      CREATE TABLE IF NOT EXISTS workflow_plans (id TEXT PRIMARY KEY, digest TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', result TEXT, error TEXT);`);
   }
   create(body: PlanBody): Plan {
     const id = randomUUID();
@@ -67,8 +76,10 @@ export class PlanStore {
     if (digest(body) !== row.digest) throw new Error('Plan integrity check failed.');
     return { id, digest: row.digest, body, status: row.status, completed: JSON.parse(row.completed), error: row.error };
   }
-  acquire(plan: Plan): { scope: string; owner: string } {
-    const scope = `${plan.body.identity}:${plan.body.appId}`;
+  acquire(plan: Plan): { scope: string; owner: string } { return this.acquireScope(plan.body.identity, plan.body.appId); }
+  /** Serializes Apple writes per account and app across processes sharing this database. */
+  acquireScope(identity: string, appId: string): { scope: string; owner: string } {
+    const scope = `${identity}:${appId}`;
     const owner = randomUUID();
     const now = Date.now();
     const result = this.db.prepare(`INSERT INTO leases(scope,owner,expires) VALUES (?,?,?)
@@ -132,9 +143,12 @@ export class PlanStore {
   setBuildFile(id: string, fileId: string): void {
     this.db.prepare("UPDATE build_jobs SET file_id=?, done_parts='[]' WHERE id=?").run(fileId, id);
   }
-  markBuildPart(id: string, offset: number): void {
+  markBuildPart(id: string, part: DonePart): void {
     const job = this.buildJob(id);
-    if (!job.doneParts.includes(offset)) this.db.prepare('UPDATE build_jobs SET done_parts=? WHERE id=?').run(JSON.stringify([...job.doneParts, offset]), id);
+    this.db.prepare('UPDATE build_jobs SET done_parts=? WHERE id=?').run(JSON.stringify([...job.doneParts.filter(p => p.offset !== part.offset), part]), id);
+  }
+  hasBuild(id: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM build_jobs WHERE id=?').get(id);
   }
   updateBuild(id: string, status: string, error: string | null = null): void {
     this.db.prepare('UPDATE build_jobs SET status=?,error=? WHERE id=?').run(status, error, id);
@@ -147,6 +161,9 @@ export class PlanStore {
     const row = this.db.prepare('SELECT body,status,error FROM creative_jobs WHERE id=?').get(id) as { body: string; status: string; error: string | null } | undefined;
     if (!row) throw new Error('Creative asset job not found.');
     return { ...JSON.parse(row.body), status: row.status, error: row.error } as CreativeJob;
+  }
+  hasCreative(id: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM creative_jobs WHERE id=?').get(id);
   }
   updateCreative(id: string, status: string, error: string | null = null): void {
     this.db.prepare('UPDATE creative_jobs SET status=?,error=? WHERE id=?').run(status, error, id);
@@ -166,6 +183,48 @@ export class PlanStore {
   }
   auditLog(limit = 100): Record<string, unknown>[] {
     return this.db.prepare('SELECT at,os_user,command,account,app_id,ok,error FROM audit_log ORDER BY at DESC LIMIT ?').all(limit) as Record<string, unknown>[];
+  }
+  createApiPlan(body: ApiPlanBody): ApiPlan {
+    const id = randomUUID();
+    const text = JSON.stringify(body);
+    this.db.prepare('INSERT INTO api_plans(id,digest,body) VALUES (?,?,?)').run(id, createHash('sha256').update(text).digest('hex'), text);
+    return this.apiPlan(id);
+  }
+  apiPlan(id: string): ApiPlan {
+    const row = this.db.prepare('SELECT * FROM api_plans WHERE id=?').get(id) as Record<string, any> | undefined;
+    if (!row) throw new Error('API plan not found.');
+    if (createHash('sha256').update(row.body).digest('hex') !== row.digest) throw new Error('API plan integrity check failed.');
+    return { id, digest: row.digest, body: JSON.parse(row.body), status: row.status, result: row.result ? JSON.parse(row.result) : null, error: row.error };
+  }
+  /** Atomically claims a plan, so two processes cannot send the same write. */
+  claimApiPlan(id: string): boolean {
+    return !!this.db.prepare("UPDATE api_plans SET status='running' WHERE id=? AND status IN ('pending','failed')").run(id).changes;
+  }
+  finishApiPlan(id: string, status: 'completed' | 'failed' | 'uncertain', result: unknown, error: string | null): void {
+    this.db.prepare('UPDATE api_plans SET status=?,result=?,error=? WHERE id=?').run(status, result === undefined ? null : JSON.stringify(result), error, id);
+  }
+  createWorkflowPlan(body: WorkflowPlanBody): WorkflowPlan {
+    const id = randomUUID();
+    const raw = JSON.stringify(body);
+    this.db.prepare('INSERT INTO workflow_plans(id,digest,body) VALUES (?,?,?)').run(id, createHash('sha256').update(raw).digest('hex'), raw);
+    return this.workflowPlan(id);
+  }
+  workflowPlan(id: string): WorkflowPlan {
+    const row = this.db.prepare('SELECT * FROM workflow_plans WHERE id=?').get(id) as Record<string, any> | undefined;
+    if (!row) throw new Error('Workflow plan not found.');
+    if (createHash('sha256').update(row.body).digest('hex') !== row.digest) throw new Error('Workflow plan integrity check failed.');
+    return { id, digest: row.digest, body: JSON.parse(row.body), status: row.status, result: row.result ? JSON.parse(row.result) : null, error: row.error };
+  }
+  claimWorkflowPlan(id: string): boolean {
+    return !!this.db.prepare("UPDATE workflow_plans SET status='running' WHERE id=? AND status='pending'").run(id).changes;
+  }
+  finishWorkflowPlan(id: string, status: 'completed' | 'uncertain', result: unknown, error: string | null): void {
+    this.db.prepare('UPDATE workflow_plans SET status=?,result=?,error=? WHERE id=?').run(status, result === undefined ? null : JSON.stringify(result), error, id);
+  }
+  /** Asset jobs for one locale and group, used to skip files a rerun already placed. */
+  assetJobsFor(localizationId: string, placementGroup: string): AssetJob[] {
+    const rows = this.db.prepare('SELECT id FROM asset_jobs').all() as { id: string }[];
+    return rows.map(r => this.asset(r.id)).filter(j => j.localizationId === localizationId && j.placementGroup === placementGroup);
   }
   close(): void { this.db.close(); }
 }

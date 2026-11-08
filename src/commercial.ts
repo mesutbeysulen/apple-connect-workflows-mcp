@@ -1,5 +1,6 @@
 import { requireWrite, type Account } from './config.js';
-import type { Resource } from './apple.js';
+import { AppleError, type Resource } from './apple.js';
+import { validId } from './apple-rules.js';
 
 export interface CommercialAPI {
   get(path: string): Promise<Resource>;
@@ -7,7 +8,6 @@ export interface CommercialAPI {
   post(path: string, body: unknown): Promise<Resource>;
   patch(path: string, type: string, id: string, attributes: Record<string, unknown>): Promise<unknown>;
 }
-const validId = (id: string) => /^[A-Za-z0-9-]{1,128}$/.test(id);
 const validProductId = (id: string) => /^[A-Za-z0-9._-]{1,100}$/.test(id);
 const validName = (name: string) => [...name].length >= 1 && [...name].length <= 64;
 const rel = (type: string, id: string) => ({ data: { type, id } });
@@ -53,7 +53,7 @@ export async function createSubscriptionGroup(input: { account: Account; appId: 
 export async function createSubscription(input: { account: Account; appId: string; groupId: string; productId: string; name: string; period: string; groupLevel?: number }, api: CommercialAPI): Promise<Created> {
   const { account, appId, groupId, productId, name, period, groupLevel } = input;
   requireWrite(account, appId);
-  if (!validId(groupId) || !validProductId(productId) || !validName(name) || !SUBSCRIPTION_PERIODS.includes(period)) throw new Error(`Use valid IDs, a name up to 64 characters and a period of ${SUBSCRIPTION_PERIODS.join(', ')}.`);
+  if (!validId(groupId) || !validProductId(productId) || !validName(name) || !SUBSCRIPTION_PERIODS.includes(period) || (groupLevel !== undefined && (!Number.isInteger(groupLevel) || groupLevel < 1))) throw new Error(`Use valid IDs, a name up to 64 characters and a period of ${SUBSCRIPTION_PERIODS.join(', ')}; group level must be a positive integer.`);
   const groups = await api.list(`/v1/apps/${appId}/subscriptionGroups?limit=200`, 2000);
   if (!groups.data.some(row => row.id === groupId)) throw new Error('Subscription group does not belong to this app.');
   const subs = await api.list(`/v1/subscriptionGroups/${groupId}/subscriptions?limit=200`, 2000);
@@ -84,7 +84,19 @@ export async function localizeProduct(input: { account: Account; appId: string; 
   const created = await api.post(`${prefix}/${resource}`, { data: { type: resource, attributes: { name, locale, ...(description === undefined ? {} : { description }) }, relationships } });
   return { status: 'created', id: created.id };
 }
-export interface PricePreview { dryRun: boolean; target: string; territory: string; price: string; pricePointId: string; startDate: string | null; effect: string; result?: string }
+export interface CurrentPrice { id: string; manual?: unknown; startDate: unknown; endDate: unknown; territory?: string; pricePointId?: string }
+export interface PricePreview { dryRun: boolean; target: string; territory: string; price: string; pricePointId: string; startDate: string | null; effect: string; current: CurrentPrice[]; currentIncomplete: boolean; result?: string; status?: 'created' | 'exists' }
+const linkedId = (row: Resource, relation: string) => { const data = row.relationships?.[relation]?.data; return data && !Array.isArray(data) ? data.id : undefined; };
+const toPrice = (row: Resource, pointRelation: string): CurrentPrice => ({ id: row.id, manual: row.attributes.manual, startDate: row.attributes.startDate ?? null, endDate: row.attributes.endDate ?? null, territory: linkedId(row, 'territory'), pricePointId: linkedId(row, pointRelation) });
+/** Reads the manual prices a new schedule would replace, so the preview and output keep a record of them. */
+async function currentSchedule(api: CommercialAPI, schedulePath: string, resource: string, pointRelation: string): Promise<{ current: CurrentPrice[]; currentIncomplete: boolean }> {
+  let schedule: Resource | null;
+  try { schedule = await api.get(schedulePath); }
+  catch (error) { if (error instanceof AppleError && error.status === 404) return { current: [], currentIncomplete: false }; throw error; }
+  if (!schedule) return { current: [], currentIncomplete: false };
+  const rows = await api.list(`/v1/${resource}/${schedule.id}/manualPrices?${new URLSearchParams({ include: `${pointRelation},territory`, limit: '200' })}`, 2000);
+  return { current: rows.data.map(row => toPrice(row, pointRelation)), currentIncomplete: rows.truncated };
+}
 /** Matches a decimal price exactly; Apple only sells fixed price points, so nothing is rounded silently. */
 async function pricePoint(api: CommercialAPI, path: string, territory: string, price: string): Promise<string> {
   if (!/^[A-Z]{3}$/.test(territory) || !/^\d+(\.\d{1,4})?$/.test(price)) throw new Error('Use a three-letter territory such as USA and a decimal price such as 4.99.');
@@ -102,11 +114,11 @@ export async function setAppPrice(input: { account: Account; appId: string; terr
   if (execute) requireWrite(account, appId);
   if (!validDate(startDate)) throw new Error('Start date must be YYYY-MM-DD.');
   const id = await pricePoint(api, `/v1/apps/${appId}/appPricePoints`, territory, price);
-  const preview: PricePreview = { dryRun: !execute, target: `app ${appId}`, territory, price, pricePointId: id, startDate: startDate ?? null, effect: 'Replaces the full manual price schedule; other territories follow Apple equalization.' };
+  const preview: PricePreview = { dryRun: !execute, target: `app ${appId}`, territory, price, pricePointId: id, startDate: startDate ?? null, effect: 'Replaces the full manual price schedule listed under current; other territories follow Apple equalization.', ...await currentSchedule(api, `/v1/apps/${appId}/appPriceSchedule`, 'appPriceSchedules', 'appPricePoint') };
   if (!execute) return preview;
   const created = await api.post('/v1/appPriceSchedules', { data: { type: 'appPriceSchedules', relationships: { app: rel('apps', appId), baseTerritory: rel('territories', territory), manualPrices: { data: [{ type: 'appPrices', id: '${price}' }] } } },
     included: [{ type: 'appPrices', id: '${price}', attributes: { startDate: startDate ?? null, endDate: null }, relationships: { appPricePoint: rel('appPricePoints', id) } }, { type: 'territories', id: territory }] });
-  return { ...preview, result: created.id };
+  return { ...preview, result: created.id, status: 'created' };
 }
 export async function setIapPrice(input: { account: Account; appId: string; iapId: string; territory: string; price: string; startDate?: string; execute?: boolean }, api: CommercialAPI): Promise<PricePreview> {
   const { account, appId, iapId, territory, price, startDate, execute = false } = input;
@@ -114,11 +126,11 @@ export async function setIapPrice(input: { account: Account; appId: string; iapI
   if (!validId(iapId) || !validDate(startDate)) throw new Error('Use a valid in-app purchase ID and YYYY-MM-DD start date.');
   if (!(await appIaps(api, appId)).some(row => row.id === iapId)) throw new Error('In-app purchase does not belong to this app.');
   const id = await pricePoint(api, `/v2/inAppPurchases/${iapId}/pricePoints`, territory, price);
-  const preview: PricePreview = { dryRun: !execute, target: `iap ${iapId}`, territory, price, pricePointId: id, startDate: startDate ?? null, effect: 'Replaces the full price schedule of this in-app purchase.' };
+  const preview: PricePreview = { dryRun: !execute, target: `iap ${iapId}`, territory, price, pricePointId: id, startDate: startDate ?? null, effect: 'Replaces the full manual price schedule listed under current.', ...await currentSchedule(api, `/v2/inAppPurchases/${iapId}/iapPriceSchedule`, 'inAppPurchasePriceSchedules', 'inAppPurchasePricePoint') };
   if (!execute) return preview;
   const created = await api.post('/v1/inAppPurchasePriceSchedules', { data: { type: 'inAppPurchasePriceSchedules', relationships: { inAppPurchase: rel('inAppPurchases', iapId), baseTerritory: rel('territories', territory), manualPrices: { data: [{ type: 'inAppPurchasePrices', id: '${price}' }] } } },
     included: [{ type: 'inAppPurchasePrices', id: '${price}', attributes: { startDate: startDate ?? null, endDate: null }, relationships: { inAppPurchaseV2: rel('inAppPurchases', iapId), inAppPurchasePricePoint: rel('inAppPurchasePricePoints', id) } }, { type: 'territories', id: territory }] });
-  return { ...preview, result: created.id };
+  return { ...preview, result: created.id, status: 'created' };
 }
 export async function setSubscriptionPrice(input: { account: Account; appId: string; subscriptionId: string; territory: string; price: string; startDate?: string; preserveCurrentPrice?: boolean; execute?: boolean }, api: CommercialAPI): Promise<PricePreview> {
   const { account, appId, subscriptionId, territory, price, startDate, preserveCurrentPrice = false, execute = false } = input;
@@ -126,10 +138,16 @@ export async function setSubscriptionPrice(input: { account: Account; appId: str
   if (!validId(subscriptionId) || !validDate(startDate)) throw new Error('Use a valid subscription ID and YYYY-MM-DD start date.');
   await appSubscription(api, appId, subscriptionId);
   const id = await pricePoint(api, `/v1/subscriptions/${subscriptionId}/pricePoints`, territory, price);
-  const preview: PricePreview = { dryRun: !execute, target: `subscription ${subscriptionId}`, territory, price, pricePointId: id, startDate: startDate ?? null,
+  const existing = await api.list(`/v1/subscriptions/${subscriptionId}/prices?${new URLSearchParams({ 'filter[territory]': territory, include: 'territory,subscriptionPricePoint', limit: '200' })}`, 2000);
+  const current = existing.data.map(row => toPrice(row, 'subscriptionPricePoint'));
+  const preview: PricePreview = { dryRun: !execute, target: `subscription ${subscriptionId}`, territory, price, pricePointId: id, startDate: startDate ?? null, current, currentIncomplete: existing.truncated,
     effect: preserveCurrentPrice ? 'New subscribers pay this price; existing subscribers keep their current price.' : 'Applies to this territory. Price increases for existing subscribers may require their consent.' };
   if (!execute) return preview;
+  if (existing.truncated) throw new Error('Incomplete subscription price list; refusing a possibly duplicate price change.');
+  // A retry after a lost response must not schedule the same change twice.
+  const same = current.find(row => row.pricePointId === id && row.startDate === (startDate ?? null));
+  if (same) return { ...preview, result: same.id, status: 'exists' };
   const created = await api.post('/v1/subscriptionPrices', { data: { type: 'subscriptionPrices', attributes: { startDate: startDate ?? null, preserveCurrentPrice },
     relationships: { subscription: rel('subscriptions', subscriptionId), territory: rel('territories', territory), subscriptionPricePoint: rel('subscriptionPricePoints', id) } } });
-  return { ...preview, result: created.id };
+  return { ...preview, result: created.id, status: 'created' };
 }

@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { configSchema, type Config } from './config.js';
 
-export interface KeySetupInput { name: string; issuerId: string; keyId?: string; p8Path: string; configPath: string; keysDir?: string; allowedAppIds?: string[]; replace?: boolean }
+export interface KeySetupInput { name: string; issuerId?: string; keyId?: string; p8Path: string; configPath: string; keysDir?: string; allowedAppIds?: string[]; replace?: boolean }
 export interface KeySetupResult { account: string; keyId: string; privateKeyPath: string; configPath: string; readOnly: boolean; next: string[] }
 /**
  * Validates an App Store Connect .p8, stores a private copy and adds the account to the config.
@@ -24,7 +24,7 @@ export function setupKey(input: KeySetupInput): KeySetupResult {
   if (accounts.some(a => a.name === name) && !replace) throw new Error(`Account ${name} already exists. Pass --replace to overwrite it.`);
   const keysDir = input.keysDir ?? resolve(homedir(), '.apple-connect-mcp', 'keys');
   const privateKeyPath = join(keysDir, `AuthKey_${keyId}.p8`);
-  const account = { name, issuerId, keyId, privateKeyPath, readOnly: allowedAppIds.length === 0, allowedAppIds };
+  const account = { name, keyType: issuerId ? 'team' as const : 'individual' as const, ...(issuerId ? { issuerId } : {}), keyId, privateKeyPath, readOnly: allowedAppIds.length === 0, allowedAppIds };
   // Validate the whole resulting config before anything is written.
   const next = configSchema.parse({ ...current, accounts: [...accounts.filter(a => a.name !== name), account] });
   mkdirSync(keysDir, { recursive: true, mode: 0o700 });
@@ -37,5 +37,5 @@ export function setupKey(input: KeySetupInput): KeySetupResult {
     renameSync(temporary, configPath);
   } finally { rmSync(temporary, { force: true }); }
   return { account: name, keyId, privateKeyPath, configPath, readOnly: account.readOnly, next: [
-    `export APPLE_CONNECT_CONFIG="${configPath}"`, 'node dist/cli.js doctor', `After doctor succeeds, you may delete the original key at ${p8Path}.`] };
+    `export APPLE_CONNECT_CONFIG="${configPath}"`, 'node dist/cli.js doctor', ...(resolve(p8Path) === resolve(privateKeyPath) ? [] : [`After doctor succeeds, you may delete the original key at ${p8Path}.`])] };
 }

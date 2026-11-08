@@ -5,6 +5,8 @@ import { basename, isAbsolute } from 'node:path';
 import { accountIdentity, requireWrite, type Account } from './config.js';
 import type { Resource } from './apple.js';
 import type { BuildJob, PlanStore } from './plans.js';
+import { validId } from './apple-rules.js';
+import { putFilePart, validateOperations } from './upload-transfer.js';
 
 export interface BuildUploadAPI {
   post(path: string, body: unknown): Promise<Resource>;
@@ -13,8 +15,6 @@ export interface BuildUploadAPI {
   patch(path: string, type: string, id: string, attrs: Record<string, unknown>): Promise<unknown>;
 }
 export interface BuildUploadResult { uploadId: string; fileId: string; state: string; resumedParts?: number }
-interface Part { method: string; url: string; offset: number; length: number; expiration?: string; requestHeaders: { name: string; value: string }[] }
-const validId = (id: string) => /^[A-Za-z0-9-]{1,128}$/.test(id);
 const uploadState = (r: Resource) => String((r.attributes.state as { state?: string } | undefined)?.state ?? 'UNKNOWN');
 const fileState = (r: Resource) => String((r.attributes.assetDeliveryState as { state?: string } | undefined)?.state ?? 'AWAITING_UPLOAD');
 const problems = (r: Resource) => {
@@ -22,29 +22,16 @@ const problems = (r: Resource) => {
   return Array.isArray(errors) && errors.length ? ` Apple errors: ${JSON.stringify(errors).slice(0, 800)}` : '';
 };
 
-function parts(value: unknown, size: number): Part[] {
-  if (!Array.isArray(value) || !value.length) throw new Error('Apple supplied no build upload operations.');
-  const result = [...value as Part[]].sort((a, b) => a.offset - b.offset);
-  let end = 0;
-  for (const part of result) {
-    const url = new URL(part.url);
-    if (url.protocol !== 'https:' || !url.hostname.endsWith('.apple.com') || url.username || url.password) throw new Error('Unsafe build upload URL.');
-    if (part.method !== 'PUT' || !Number.isSafeInteger(part.offset) || !Number.isSafeInteger(part.length) || part.length < 1 || part.offset !== end) throw new Error('Invalid build upload byte ranges.');
-    if (!Array.isArray(part.requestHeaders) || part.requestHeaders.some(h => /^(authorization|cookie|host)$/i.test(h.name))) throw new Error('Unsafe build upload headers.');
-    end += part.length;
-  }
-  if (end !== size) throw new Error('Build upload operations do not cover the whole file.');
-  return result;
-}
 async function inspectIpa(filePath: string): Promise<{ size: number; sha256: string }> {
-  if (!isAbsolute(filePath) || !filePath.toLowerCase().endsWith('.ipa')) throw new Error('Use an absolute .ipa path.');
+  const lower = filePath.toLowerCase();
+  if (!isAbsolute(filePath) || !(lower.endsWith('.ipa') || lower.endsWith('.pkg'))) throw new Error('Use an absolute .ipa or .pkg path.');
   const info = await stat(filePath);
   if (!info.isFile() || info.size < 1 || !Number.isSafeInteger(info.size)) throw new Error('Invalid IPA file.');
   const handle = await open(filePath, 'r');
   try {
     const magic = Buffer.alloc(4);
     await handle.read(magic, 0, 4, 0);
-    if (!magic.equals(Buffer.from([0x50,0x4b,0x03,0x04]))) throw new Error('IPA must be a ZIP archive.');
+    if (lower.endsWith('.ipa') ? !magic.equals(Buffer.from([0x50,0x4b,0x03,0x04])) : !magic.equals(Buffer.from('xar!'))) throw new Error(lower.endsWith('.ipa') ? 'IPA must be a ZIP archive.' : 'PKG must be a xar archive.');
   } finally { await handle.close(); }
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(filePath)) hash.update(chunk);
@@ -55,18 +42,25 @@ async function inspectIpa(filePath: string): Promise<{ size: number; sha256: str
  * Reserves a build upload, journals it, streams the IPA to Apple's signed URLs and commits its SHA-256.
  * Refuses to open a second reservation for a version/build pair that already has a live upload.
  */
-export async function uploadBuild(input: { account: Account; appId: string; version: string; build: string; filePath: string },
+export async function uploadBuild(input: { account: Account; appId: string; version: string; build: string; filePath: string; platform?: string },
   api: BuildUploadAPI, fetcher: typeof fetch = fetch, store?: PlanStore): Promise<BuildUploadResult> {
-  const { account, appId, version, build, filePath } = input;
+  const { account, appId, version, build, filePath, platform = 'IOS' } = input;
   requireWrite(account, appId);
-  if (!/^\d+$/.test(appId) || !/^\d+(\.\d+){1,2}$/.test(version) || !/^[A-Za-z0-9.]+$/.test(build)) throw new Error('Use an app ID, numeric version/build and absolute .ipa path.');
+  if (!/^\d+$/.test(appId) || !/^\d+(\.\d+){1,2}$/.test(version) || !/^[A-Za-z0-9.]+$/.test(build)) throw new Error('Use an app ID and numeric version/build.');
+  if (!['IOS', 'MAC_OS', 'TV_OS', 'VISION_OS'].includes(platform)) throw new Error('Platform must be IOS, MAC_OS, TV_OS or VISION_OS.');
+  if ((platform === 'MAC_OS') !== filePath.toLowerCase().endsWith('.pkg')) throw new Error('MAC_OS uses a .pkg file; other platforms use .ipa.');
   const { size, sha256 } = await inspectIpa(filePath);
-  const query = new URLSearchParams({ 'filter[cfBundleShortVersionString]': version, 'filter[cfBundleVersion]': build, limit: '50' });
+  const query = new URLSearchParams({ 'filter[cfBundleShortVersionString]': version, 'filter[cfBundleVersion]': build, 'filter[platform]': platform, limit: '50' });
   const previous = await api.list(`/v1/apps/${appId}/buildUploads?${query}`, 50);
   const live = previous.data.find(row => uploadState(row) !== 'FAILED');
-  if (previous.truncated || live) throw new Error(`Build upload ${live?.id ?? '(unknown)'} already exists for ${version} (${build}) in state ${live ? uploadState(live) : 'unknown'}. Use build-resume or build-wait instead of a new upload.`);
+  if (previous.truncated) throw new Error('Incomplete build upload list; refusing an uncertain duplicate reservation.');
+  if (live) {
+    const state = uploadState(live);
+    const next = state === 'AWAITING_UPLOAD' ? 'Continue it with build-resume, or remove it with build-cancel if it has no local journal.' : 'Follow it with build-wait.';
+    throw new Error(`Build upload ${live.id} already exists for ${version} (${build}) in state ${state}. ${next}`);
+  }
   const reserved = await api.post('/v1/buildUploads', { data: { type: 'buildUploads', attributes: {
-    cfBundleShortVersionString: version, cfBundleVersion: build, platform: 'IOS',
+    cfBundleShortVersionString: version, cfBundleVersion: build, platform,
   }, relationships: { app: { data: { type: 'apps', id: appId } } } } });
   if (reserved.type !== 'buildUploads' || !reserved.id || !validId(reserved.id)) throw new Error('Invalid build upload reservation.');
   const job: BuildJob = { id: reserved.id, account: account.name, identity: accountIdentity(account), appId, version, build, filePath,
@@ -83,7 +77,7 @@ async function continueBuild(job: BuildJob, api: BuildUploadAPI, fetcher: typeof
       const existing = await api.list(`/v1/buildUploads/${job.id}/buildUploadFiles?limit=10`, 10);
       file = existing.data.find(row => row.attributes.assetType === 'ASSET' && row.attributes.fileSize === job.size);
       file ??= await api.post('/v1/buildUploadFiles', { data: { type: 'buildUploadFiles', attributes: {
-        assetType: 'ASSET', fileName: basename(job.filePath), fileSize: job.size, uti: 'com.apple.ipa',
+        assetType: 'ASSET', fileName: basename(job.filePath), fileSize: job.size, uti: job.filePath.toLowerCase().endsWith('.pkg') ? 'com.apple.pkg' : 'com.apple.ipa',
       }, relationships: { buildUpload: { data: { type: 'buildUploads', id: job.id } } } } });
       if (file.type !== 'buildUploadFiles' || !file.id || !validId(file.id)) throw new Error('Invalid build file reservation.');
       fileId = file.id;
@@ -95,17 +89,13 @@ async function continueBuild(job: BuildJob, api: BuildUploadAPI, fetcher: typeof
     if (state === 'FAILED') throw new Error(`Apple reports the build file failed.${problems(file)}`);
     let skipped = 0;
     if (state === 'AWAITING_UPLOAD') {
-      const done = new Set(job.doneParts);
-      for (const part of parts(file.attributes.uploadOperations, job.size)) {
-        if (done.has(part.offset)) { skipped++; continue; }
+      for (const part of validateOperations(file.attributes.uploadOperations, job.size)) {
+        // Skip only a range sent to this same session with the same boundaries; re-issued operations resend it.
+        const path = new URL(part.url).pathname;
+        if (job.doneParts.some(p => p.offset === part.offset && p.length === part.length && p.path === path)) { skipped++; continue; }
         if (part.expiration && Date.parse(part.expiration) <= Date.now()) throw new Error('Signed build upload URLs expired; Apple must issue new upload operations.');
-        const response = await fetcher(part.url, { method: 'PUT', redirect: 'error', signal: AbortSignal.timeout(10 * 60_000),
-          headers: Object.fromEntries(part.requestHeaders.map(h => [h.name, h.value])),
-          body: createReadStream(job.filePath, { start: part.offset, end: part.offset + part.length - 1 }), duplex: 'half',
-        } as unknown as RequestInit);
-        if (!response.ok) throw new Error(`Build part transfer failed: HTTP ${response.status}.`);
-        await response.body?.cancel();
-        store?.markBuildPart(job.id, part.offset);
+        await putFilePart(part, job.filePath, fetcher);
+        store?.markBuildPart(job.id, { offset: part.offset, length: part.length, path });
       }
       const after = await stat(job.filePath);
       if (after.size !== job.size) throw new Error('IPA changed during upload.');
@@ -141,4 +131,18 @@ export async function resumeBuild(uploadId: string, account: Account, store: Pla
     return { uploadId, fileId: job.fileId ?? '', state };
   }
   return continueBuild(job, api, fetcher, store);
+}
+/** Removes a stuck reservation, including one with no local journal. Only unfinished or failed uploads qualify. */
+export async function cancelBuildUpload(input: { account: Account; appId: string; uploadId: string }, api: Pick<BuildUploadAPI, 'list'> & { delete(path: string): Promise<void> }, store?: PlanStore): Promise<{ cancelled: string }> {
+  const { account, appId, uploadId } = input;
+  requireWrite(account, appId);
+  if (!validId(uploadId) || !/^\d+$/.test(appId)) throw new Error('Invalid app or build upload ID.');
+  const uploads = await api.list(`/v1/apps/${appId}/buildUploads?limit=200`, 2000);
+  const upload = uploads.data.find(row => row.id === uploadId);
+  if (!upload) throw new Error('Build upload does not belong to this app.');
+  const state = uploadState(upload);
+  if (state !== 'AWAITING_UPLOAD' && state !== 'FAILED') throw new Error(`Only AWAITING_UPLOAD or FAILED uploads can be cancelled; this one is ${state}.`);
+  await api.delete(`/v1/buildUploads/${uploadId}`);
+  if (store?.hasBuild(uploadId)) store.updateBuild(uploadId, 'cancelled');
+  return { cancelled: uploadId };
 }

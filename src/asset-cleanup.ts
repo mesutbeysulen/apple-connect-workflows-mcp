@@ -8,13 +8,13 @@ const STALE = new Set(['AWAITING_UPLOAD', 'FAILED']);
 export interface CleanupCandidate { kind: 'assetLibraryImage' | 'assetLibraryVideo' | 'legacyScreenshot'; id: string; state: string; createdAt: string; fileName?: string }
 export interface CleanupReport {
   dryRun: boolean; olderThanHours: number; truncated: boolean;
-  candidates: CleanupCandidate[]; deleted: string[]; skipped: { id: string; reason: string }[];
+  candidates: CleanupCandidate[]; deleted: string[]; archived: string[]; skipped: { id: string; reason: string }[];
 }
 const legacyState = (r: Resource) => String((r.attributes.assetDeliveryState as { state?: string } | undefined)?.state ?? 'UNKNOWN');
 const notFound = (error: unknown) => error instanceof AppleError && error.status === 404;
 
 /** Dry runs need only reads; deletion additionally needs delete. */
-export type CleanupAPI = Pick<AssetAPI, 'get' | 'list'> & Partial<Pick<AssetAPI, 'delete'>>;
+export type CleanupAPI = Pick<AssetAPI, 'get' | 'list'> & Partial<Pick<AssetAPI, 'delete' | 'patch'>>;
 async function hasPlacements(api: CleanupAPI, resource: string, id: string): Promise<boolean> {
   return (await api.list(`/v1/${resource}/${id}/placements?limit=1`, 1)).data.length > 0;
 }
@@ -31,7 +31,7 @@ export async function cleanupStaleAssets(input: { account: Account; appId: strin
   if (!Number.isFinite(olderThanHours) || olderThanHours < 1 || olderThanHours > 24 * 365) throw new Error('olderThanHours must be between 1 and 8760.');
   if (execute) requireWrite(account, appId);
   const cutoff = (input.now ?? Date.now()) - olderThanHours * 3_600_000;
-  const report: CleanupReport = { dryRun: !execute, olderThanHours, truncated: false, candidates: [], deleted: [], skipped: [] };
+  const report: CleanupReport = { dryRun: !execute, olderThanHours, truncated: false, candidates: [], deleted: [], archived: [], skipped: [] };
 
   const libraryId = await assetLibraryId(api, appId);
   const query = new URLSearchParams({ 'filter[state]': [...STALE].join(','), sort: 'createdDate', limit: '200' });
@@ -56,7 +56,13 @@ export async function cleanupStaleAssets(input: { account: Account; appId: strin
       if (job.createdAt > cutoff) continue;
       let remote: Resource;
       try { remote = await api.get(`/v1/appScreenshots/${job.id}`); }
-      catch (error) { if (notFound(error)) { store.updateScreenshot(job.id, 'gone'); continue; } throw error; }
+      catch (error) {
+        if (!notFound(error)) throw error;
+        // A preview must leave the journal untouched.
+        if (execute) store.updateScreenshot(job.id, 'gone');
+        else report.skipped.push({ id: job.id, reason: 'Already removed at Apple.' });
+        continue;
+      }
       const state = legacyState(remote);
       if (STALE.has(state)) report.candidates.push({ kind: 'legacyScreenshot', id: job.id, state, createdAt: new Date(job.createdAt).toISOString() });
     }
@@ -72,8 +78,17 @@ export async function cleanupStaleAssets(input: { account: Account; appId: strin
         const fresh = await api.get(`/v1/${resource}/${candidate.id}`);
         if (!STALE.has(imageState(fresh))) { report.skipped.push({ id: candidate.id, reason: `State changed to ${imageState(fresh)}.` }); continue; }
         if (await hasPlacements(api, resource, candidate.id)) { report.skipped.push({ id: candidate.id, reason: 'Asset was placed meanwhile.' }); continue; }
-        await remove(`/v1/${resource}/${candidate.id}`);
-        if (store?.hasAsset(candidate.id)) store.updateAsset(candidate.id, 'deleted');
+        let outcome = 'deleted';
+        try { await remove(`/v1/${resource}/${candidate.id}`); }
+        catch (error) {
+          // Apple documents deletion only for prepared assets; archiving takes a refused one out of use.
+          if (!(error instanceof AppleError) || error.status === 404 || error.status >= 500 || !api.patch) throw error;
+          await api.patch(`/v1/${resource}/${candidate.id}`, resource, candidate.id, { archived: true });
+          outcome = 'archived';
+        }
+        if (store?.hasAsset(candidate.id)) store.updateAsset(candidate.id, outcome);
+        if (store?.hasCreative(candidate.id)) store.updateCreative(candidate.id, outcome);
+        if (outcome === 'archived') { report.archived.push(candidate.id); continue; }
       } else {
         const fresh = await api.get(`/v1/appScreenshots/${candidate.id}`);
         if (!STALE.has(legacyState(fresh))) { report.skipped.push({ id: candidate.id, reason: `State changed to ${legacyState(fresh)}.` }); continue; }

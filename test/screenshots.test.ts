@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { uploadScreenshot, type ScreenshotAPI } from '../src/screenshots.js';
 import type { Account } from '../src/config.js';
+import { withContract } from './helpers.js';
 
 const account: Account = { name: 'team', issuerId: '11111111-1111-4111-8111-111111111111', keyId: 'ABCDEFGHIJ', privateKeyPath: '/unused', readOnly: false, allowedAppIds: ['123'] };
 const png = Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), Buffer.from('example')]);
@@ -14,7 +15,7 @@ function fixture() {
   const requests: { method: string; url: string; body?: unknown }[] = [];
   let uploadUrl = 'https://store-030.blobstore.apple.com/upload?token=secret';
   const api: ScreenshotAPI = {
-    get: async path => path.endsWith('/app') ? { id: '123', type: 'apps', attributes: {} } : { id: 'version', type: 'appStoreVersions', attributes: { appStoreState: 'PREPARE_FOR_SUBMISSION', assetDeliveryState: { state: 'COMPLETE' } } },
+    get: async () => ({ id: 'version', type: 'appStoreVersions', attributes: { appStoreState: 'PREPARE_FOR_SUBMISSION', assetDeliveryState: { state: 'COMPLETE' } }, relationships: { app: { data: { id: '123', type: 'apps' } } } }),
     list: async path => ({ data: [{ id: path.includes('appScreenshotSets') ? 'set-1' : 'loc', type: 'items', attributes: {} }], truncated: false }),
     post: async (path, body) => { requests.push({ method: 'POST', url: path, body }); return { id: 'screenshot', type: 'appScreenshots', attributes: { uploadOperations: [
       { method: 'PUT', url: uploadUrl, offset: 8, length: png.length - 8, requestHeaders: [{ name: 'Content-Type', value: 'image/png' }] },
@@ -30,7 +31,7 @@ function fixture() {
     parts.push(Buffer.from(init.body as Uint8Array));
     return new Response(null, { status: 200 });
   }) as typeof fetch;
-  return { dir, filePath, api, fetcher, requests, parts, setUploadUrl: (value: string) => uploadUrl = value };
+  return { dir, filePath, api: withContract(api), fetcher, requests, parts, setUploadUrl: (value: string) => uploadUrl = value };
 }
 test('uploads all Apple byte ranges, commits checksum and reports verified state', async () => {
   const f = fixture();
@@ -38,7 +39,7 @@ test('uploads all Apple byte ranges, commits checksum and reports verified state
     const result = await uploadScreenshot({ account, appId: '123', versionId: 'version', localizationId: 'loc', setId: 'set-1', filePath: f.filePath }, f.api, f.fetcher);
     assert.deepEqual(result, { screenshotId: 'screenshot', state: 'COMPLETE' });
     assert.equal(f.requests[0]!.method, 'POST');
-    assert.deepEqual(f.parts, [png.subarray(8), png.subarray(0,8)]);
+    assert.deepEqual(f.parts, [png.subarray(0,8), png.subarray(8)]);
     assert.deepEqual(f.requests.at(-1)!.body, { uploaded: true, sourceFileChecksum: createHash('md5').update(png).digest('hex') });
   } finally { rmSync(f.dir, { recursive: true }); }
 });

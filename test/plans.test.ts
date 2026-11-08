@@ -15,7 +15,7 @@ function fixture(store = new PlanStore(':memory:')) {
   let patches = 0;
   let loseResponse = false;
   const api: AppleAPI = {
-    get: async path => structuredClone(path.endsWith('/app') ? { id: '123', type: 'apps', attributes: {} } : path.includes('appStoreVersionLocalizations') ? remote : { id: 'v1', type: 'appStoreVersions', attributes: { appStoreState: state } }),
+    get: async path => structuredClone(path.includes('appStoreVersionLocalizations') ? remote : { id: 'v1', type: 'appStoreVersions', attributes: { appStoreState: state }, relationships: { app: { data: { id: '123', type: 'apps' } } } }),
     list: async () => ({ data: [structuredClone(remote)], truncated: false }),
     patch: async (_path, _type, _id, attrs) => { patches++; Object.assign(remote.attributes, attrs); if (loseResponse) { loseResponse = false; throw new Error('Network response lost'); } return {}; },
   };
@@ -108,9 +108,8 @@ test('multi-locale failure preserves completed steps and resumes only remaining 
   const writes: string[] = [];
   let fail = true;
   const api: AppleAPI = {
-    get: async path => structuredClone(path.endsWith('/app') ? { id: '123', type: 'apps', attributes: {} }
-      : path.includes('/appStoreVersionLocalizations/') ? remote.find(r => path.endsWith(r.id))!
-      : { id: 'v1', type: 'appStoreVersions', attributes: { appStoreState: 'PREPARE_FOR_SUBMISSION' } }),
+    get: async path => structuredClone(path.includes('/appStoreVersionLocalizations/') ? remote.find(r => path.endsWith(r.id))!
+      : { id: 'v1', type: 'appStoreVersions', attributes: { appStoreState: 'PREPARE_FOR_SUBMISSION' }, relationships: { app: { data: { id: '123', type: 'apps' } } } }),
     list: async () => ({ data: structuredClone(remote), truncated: false }),
     patch: async (_path, _type, id, attrs) => {
       if (id === 'loc-tr' && fail) { fail = false; throw new Error('Temporary outage'); }

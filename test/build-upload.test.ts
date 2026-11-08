@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { uploadBuild, type BuildUploadAPI } from '../src/build-upload.js';
 import type { Account } from '../src/config.js';
+import { withContract } from './helpers.js';
 const account: Account = { name: 'team', issuerId: '11111111-1111-4111-8111-111111111111', keyId: 'ABCDEFGHIJ', privateKeyPath: '/unused', readOnly: false, allowedAppIds: ['123'] };
 const bytes = Buffer.concat([Buffer.from([0x50,0x4b,0x03,0x04]), Buffer.from('buildbytes')]);
 function fixture() {
@@ -32,7 +33,7 @@ function fixture() {
     chunks.push(Buffer.concat(pieces));
     return new Response(null, { status: 200 });
   }) as typeof fetch;
-  return { dir, filePath, api, fetcher, chunks, setUrl: (x: string) => partsUrl = x, get posts() { return posts; }, get committed() { return committed; } };
+  return { dir, filePath, api: withContract(api), fetcher, chunks, setUrl: (x: string) => partsUrl = x, get posts() { return posts; }, get committed() { return committed; } };
 }
 test('reserves, streams every byte range and commits SHA-256', async () => {
   const f = fixture();
@@ -49,12 +50,15 @@ test('invalid IPA and unsafe upload URL are rejected', async () => {
     await assert.rejects(uploadBuild({ account, appId: '123', version: '1.2.3', build: '42', filePath: f.filePath }, f.api, f.fetcher), /ZIP/);
     assert.equal(f.posts, 0);
     writeFileSync(f.filePath, bytes); f.setUrl('https://other.example/upload');
-    await assert.rejects(uploadBuild({ account, appId: '123', version: '1.2.3', build: '42', filePath: f.filePath }, f.api, f.fetcher), /Unsafe build upload URL/);
+    await assert.rejects(uploadBuild({ account, appId: '123', version: '1.2.3', build: '42', filePath: f.filePath }, f.api, f.fetcher), /Unsafe Apple upload URL/);
     assert.equal(f.chunks.length, 0);
   } finally { rmSync(f.dir, { recursive: true }); }
 });
 
-import { resumeBuild } from '../src/build-upload.js';
+import { resumeBuild, cancelBuildUpload } from '../src/build-upload.js';
+import { createServer } from 'node:http';
+import { putFilePart } from '../src/upload-transfer.js';
+import { AppleError } from '../src/apple.js';
 import { waitForBuild, buildStatus } from '../src/build-status.js';
 import { distributeToGroups } from '../src/testflight.js';
 import { PlanStore } from '../src/plans.js';
@@ -74,14 +78,14 @@ function resumable() {
     if (url === failOn) { failOn = undefined; return new Response(null, { status: 500 }); }
     urls.push(url); return new Response(null, { status: 200 });
   }) as typeof fetch;
-  return { dir, filePath, api, fetcher, urls, get commits() { return commits; }, get posts() { return posts; }, setState: (s: string) => uploadState = s };
+  return { dir, filePath, api: withContract(api), fetcher, urls, get commits() { return commits; }, get posts() { return posts; }, setState: (s: string) => uploadState = s };
 }
 test('interrupted IPA upload resumes from the failed part without a new reservation', async () => {
   const f = resumable(); const store = new PlanStore(':memory:');
   try {
     await assert.rejects(uploadBuild({ account, appId: '123', version: '1.2.3', build: '42', filePath: f.filePath }, f.api, f.fetcher, store), /Build upload ID: upload/);
     assert.equal(store.buildJob('upload').status, 'needs_reconciliation');
-    assert.deepEqual(store.buildJob('upload').doneParts, [0]);
+    assert.deepEqual(store.buildJob('upload').doneParts, [{ offset: 0, length: 4, path: '/1' }]);
     const posts = f.posts;
     const result = await resumeBuild('upload', account, store, f.api, f.fetcher);
     assert.deepEqual(result, { uploadId: 'upload', fileId: 'file', state: 'PROCESSING', resumedParts: 1 });
@@ -107,7 +111,7 @@ test('a live upload for the same version and build blocks another reservation; a
   const row = (state: string) => ({ id: 'old', type: 'buildUploads', attributes: { state: { state } } });
   try {
     const live = { ...f.api, list: async () => ({ data: [row('PROCESSING')], truncated: false }) };
-    await assert.rejects(uploadBuild({ account, appId: '123', version: '1.2.3', build: '42', filePath: f.filePath }, live, f.fetcher), /old already exists/);
+    await assert.rejects(uploadBuild({ account, appId: '123', version: '1.2.3', build: '42', filePath: f.filePath }, live, f.fetcher), /old already exists.*build-wait/);
     assert.equal(f.posts, 0);
     const failed = { ...f.api, list: async () => ({ data: [row('FAILED')], truncated: false }) };
     assert.equal((await uploadBuild({ account, appId: '123', version: '1.2.3', build: '42', filePath: f.filePath }, failed, f.fetcher)).uploadId, 'upload');
@@ -142,4 +146,54 @@ test('multi-group distribution reports each group and continues after a failure'
   assert.equal(result.ok, false);
   assert.deepEqual(result.groups.map(g => g.status), ['submitted', 'failed', 'already_assigned']);
   await assert.rejects(distributeToGroups({ account, appId: '123', buildId: 'b', groupIds: ['a', 'a'] }, api), /distinct/);
+});
+test('re-issued operations resend a part instead of skipping it', async () => {
+  const f = resumable(); const store = new PlanStore(':memory:');
+  try {
+    await assert.rejects(uploadBuild({ account, appId: '123', version: '1.2.3', build: '42', filePath: f.filePath }, f.api, f.fetcher, store));
+    const reissued = [{ ...ops[0]!, url: 'https://store.apple.com/new1' }, { ...ops[1]!, url: 'https://store.apple.com/new2' }];
+    const api: BuildUploadAPI = { ...f.api, get: async path => path.startsWith('/v1/buildUploadFiles/') ? { id: 'file', type: 'buildUploadFiles', attributes: { uploadOperations: reissued } } : f.api.get(path) };
+    const result = await resumeBuild('upload', account, store, api, f.fetcher);
+    assert.equal(result.resumedParts, undefined);
+    assert.deepEqual(f.urls.slice(-2), ['https://store.apple.com/new1', 'https://store.apple.com/new2']);
+  } finally { store.close(); rmSync(f.dir, { recursive: true }); }
+});
+test('stream upload declares Content-Length and sends the exact range with real fetch', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'build-')); const filePath = join(dir, 'app.ipa'); writeFileSync(filePath, bytes);
+  const seen: { length?: string; chunked?: string; body: Buffer }[] = [];
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on('data', c => chunks.push(c));
+    request.on('end', () => { seen.push({ length: request.headers['content-length'], chunked: request.headers['transfer-encoding'], body: Buffer.concat(chunks) }); response.end(); });
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as { port: number };
+  try {
+    await putFilePart({ url: `http://127.0.0.1:${port}/`, offset: 4, length: bytes.length - 4, requestHeaders: [] }, filePath, fetch);
+    assert.deepEqual(seen, [{ length: String(bytes.length - 4), chunked: undefined, body: bytes.subarray(4) }]);
+  } finally { await new Promise(r => server.close(r)); rmSync(dir, { recursive: true }); }
+});
+test('build-cancel removes only unfinished uploads of this app', async () => {
+  const deleted: string[] = [];
+  const row = (id: string, state: string) => ({ id, type: 'buildUploads', attributes: { state: { state } } });
+  const api = { list: async () => ({ data: [row('stuck', 'AWAITING_UPLOAD'), row('busy', 'PROCESSING')], truncated: false }), delete: async (path: string) => { deleted.push(path); } };
+  assert.deepEqual(await cancelBuildUpload({ account, appId: '123', uploadId: 'stuck' }, api), { cancelled: 'stuck' });
+  await assert.rejects(cancelBuildUpload({ account, appId: '123', uploadId: 'busy' }, api), /Only AWAITING_UPLOAD/);
+  await assert.rejects(cancelBuildUpload({ account, appId: '123', uploadId: 'other' }, api), /does not belong/);
+  await assert.rejects(cancelBuildUpload({ account: { ...account, readOnly: true }, appId: '123', uploadId: 'stuck' }, api), /read-only/);
+  assert.deepEqual(deleted, ['/v1/buildUploads/stuck']);
+});
+test('build wait survives transient errors but stops on client errors', async () => {
+  let calls = 0; let clock = 0; const retries: unknown[] = [];
+  const api = { get: async (path: string) => {
+    if (path.startsWith('/v1/builds/')) return { id: 'b', type: 'builds', attributes: { processingState: 'VALID' } };
+    if (++calls <= 2) throw new TypeError('fetch failed');
+    return { id: 'u', type: 'buildUploads', attributes: { state: { state: 'COMPLETE' } }, relationships: { build: { data: { id: 'b', type: 'builds' } } } };
+  } };
+  const result = await waitForBuild(api, 'u', { intervalMs: 1000, sleep: async () => { clock += 1000; }, now: () => clock, onRetry: e => retries.push(e) });
+  assert.equal(result.ok, true); assert.equal(retries.length, 2);
+  const denied = { get: async () => { throw new AppleError(403, []); } };
+  await assert.rejects(waitForBuild(denied, 'u', { intervalMs: 1000, sleep: async () => {} }), /403/);
+  let t = 0;
+  await assert.rejects(waitForBuild({ get: async () => { throw new TypeError('fetch failed'); } }, 'u', { intervalMs: 1000, timeoutMs: 2000, sleep: async () => { t += 1000; }, now: () => t }), /fetch failed/);
 });

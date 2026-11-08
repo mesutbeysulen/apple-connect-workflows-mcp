@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { createWebhook, deleteWebhook, pingWebhook, redeliverWebhook, setWebhookEnabled, verifySignature, webhookReceiver, webhookSecret } from '../src/webhooks.js';
 import { setupKey } from '../src/key-setup.js';
 import { configSchema, requireCapability } from '../src/config.js';
-import { assertReadablePath, searchCatalog } from '../src/catalog.js';
+import { assertReadablePath, redactSecrets, searchCatalog } from '../src/catalog.js';
 import { AppleClient } from '../src/apple.js';
 import { PlanStore } from '../src/plans.js';
 import { account, readOnly, res, fakeApi } from './helpers.js';
@@ -21,7 +21,8 @@ test('webhook creation requires HTTPS, reuses matches and never returns the secr
   assert.deepEqual(result, { status: 'created', webhookId: 'created' });
   assert(!JSON.stringify(result).includes(secret));
   assert.equal((f.writes()[0]!.body as any).data.attributes.secret, secret);
-  assert.equal((await createWebhook({ ...input, name: 'ci', url: 'https://hooks.example/a' }, f.api)).status, 'exists');
+  assert.equal((await createWebhook({ ...input, name: 'ci', url: 'https://hooks.example/a' }, f.api)).status, 'secret_updated');
+  assert.deepEqual(f.writes().at(-1)!.body, { secret });
   await assert.rejects(createWebhook({ ...input, url: 'http://hooks.example/b' }, f.api), /HTTPS/);
   await assert.rejects(createWebhook({ ...input, url: 'https://u:p@hooks.example/b' }, f.api), /HTTPS/);
   await assert.rejects(createWebhook({ ...input, account: readOnly }, f.api), /read-only/);
@@ -78,6 +79,9 @@ test('key setup stores a private copy, defaults to read-only and keeps other acc
     const saved = configSchema.parse(JSON.parse(readFileSync(configPath, 'utf8')));
     assert.deepEqual(saved.accounts.map(a => a.name), ['main', 'second']);
     assert(!readFileSync(configPath, 'utf8').includes('PRIVATE KEY'));
+    assert(result.next.some(n => /delete the original/.test(n)));
+    const stored = setupKey({ name: 'third', issuerId, p8Path: result.privateKeyPath, configPath, keysDir });
+    assert(!stored.next.some(n => /delete the original/.test(n)));
     const rsa = join(dir, 'AuthKey_ZZZZZZZZZZ.p8');
     writeFileSync(rsa, generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' }));
     assert.throws(() => setupKey({ name: 'bad', issuerId, p8Path: rsa, configPath, keysDir }), /ES256/);
@@ -113,6 +117,18 @@ test('catalog search finds endpoints and generic reads stay on real GET endpoint
   assert.throws(() => assertReadablePath('/v1/appStoreVersionReleaseRequests'), /not a GET endpoint/);
   assert.throws(() => assertReadablePath('https://evil.example/v1/apps'), /API path/);
   assert.throws(() => assertReadablePath('//evil.example/v1/apps'), /API path/);
+});
+test('credentials are redacted from anything shown to a model', () => {
+  const value = { data: { id: 'r', attributes: { contactEmail: 'a@x', demoAccountName: 'demo', demoAccountPassword: 'hunter2', secret: 's', certificateContent: 'c', notes: 'n', empty: null } }, rows: [{ profileContent: 'p', name: 'ok' }] };
+  const text = JSON.stringify(redactSecrets(value));
+  for (const hidden of ['hunter2', '"demo"', '"s"', '"c"', '"p"']) assert(!text.includes(hidden), hidden);
+  for (const kept of ['a@x', '"n"', '"ok"']) assert(text.includes(kept), kept);
+});
+test('client downloads retry on throttling like other reads', async () => {
+  let calls = 0;
+  const client = new AppleClient(() => 'token', (async () => ++calls === 1 ? new Response(null, { status: 429, headers: { 'retry-after': '0' } }) : new Response('data')) as unknown as typeof fetch, async () => {});
+  assert.equal((await client.download('/v1/salesReports?x=1', 'a/b')).toString(), 'data');
+  assert.equal(calls, 2);
 });
 test('client allows versioned API paths on the Apple origin only', async () => {
   const seen: string[] = [];
