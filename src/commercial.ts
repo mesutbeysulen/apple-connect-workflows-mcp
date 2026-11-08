@@ -59,6 +59,17 @@ export async function createProductVersion(input: { account: Account; appId: str
   const created = await api.post(`/v1/${spec.version}`, { data: { type: spec.version, relationships: { [spec.relation]: rel(spec.parent, productId) } } });
   return { status: 'created', id: created.id };
 }
+export async function draftProductVersion(api: CommercialAPI, appId: string, kind: ProductKind, productId: string, versionId: string): Promise<Resource> {
+  const spec = PRODUCT_VERSION[kind];
+  if (!spec || !validId(versionId)) throw new Error('Invalid product kind or version ID.');
+  await ownedProduct(api, appId, kind, productId);
+  const versions = await api.list(`${spec.path}/${productId}/versions?limit=200`, 2000);
+  if (versions.truncated) throw new Error('Incomplete product version list.');
+  const version = versions.data.find(row => row.id === versionId);
+  if (!version) throw new Error(`Version ${versionId} does not belong to ${kind} ${productId}.`);
+  if (version.attributes.state !== 'PREPARE_FOR_SUBMISSION') throw new Error(`Version ${versionId} is not editable (${version.attributes.state}).`);
+  return version;
+}
 /** Localizes a draft product version using Apple's version-based v2 metadata API. */
 export async function localizeProductVersion(input: { account: Account; appId: string; kind: ProductKind; productId: string; versionId: string; locale: string; name: string; description?: string; customAppName?: string }, api: CommercialAPI): Promise<Created | { status: 'updated' | 'unchanged'; id: string }> {
   const { account, appId, kind, productId, versionId, locale, name, description, customAppName } = input;
@@ -66,12 +77,7 @@ export async function localizeProductVersion(input: { account: Account; appId: s
   const spec = PRODUCT_VERSION[kind];
   if (!spec || !validId(versionId) || !/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(locale) || !validName(name)) throw new Error('Use valid kind, version ID, locale and name.');
   if (kind === 'subscription-group' ? description !== undefined : customAppName !== undefined) throw new Error('This field does not apply to the selected product kind.');
-  await ownedProduct(api, appId, kind, productId);
-  const versions = await api.list(`${spec.path}/${productId}/versions?limit=200`, 2000);
-  if (versions.truncated) throw new Error('Incomplete product version list.');
-  const version = versions.data.find(row => row.id === versionId);
-  if (!version) throw new Error(`Version ${versionId} does not belong to ${kind} ${productId}.`);
-  if (version.attributes.state !== 'PREPARE_FOR_SUBMISSION') throw new Error(`Version ${versionId} is not editable (${version.attributes.state}).`);
+  await draftProductVersion(api, appId, kind, productId, versionId);
   const localizations = await api.list(`/v1/${spec.version}/${versionId}/localizations?limit=200`, 2000);
   if (localizations.truncated) throw new Error('Incomplete product localization list.');
   const found = localizations.data.find(row => row.attributes.locale === locale);

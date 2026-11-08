@@ -10,7 +10,7 @@ export interface ReadinessAPI {
 export interface ReadinessReport {
   ready: boolean; appId: string; versionId: string; versionString: string; state: string;
   automatedReady: boolean; blockers: string[]; warnings: string[]; notChecked: string[];
-  manualChecks: { id: ManualCheckId; description: string; acknowledged: boolean }[];
+  manualChecks: { id: ManualCheckId; description: string; url: string; acknowledged: boolean }[];
 }
 const blank = (value: unknown) => value === undefined || value === null || (typeof value === 'string' && !value.trim());
 /** Returns undefined when Apple has no such related resource yet. */
@@ -27,6 +27,13 @@ export const MANUAL_CHECKS = {
 } as const;
 export type ManualCheckId = keyof typeof MANUAL_CHECKS;
 export const manualCheckIds = Object.keys(MANUAL_CHECKS) as ManualCheckId[];
+export const MANUAL_CHECK_URLS: Record<ManualCheckId, string> = {
+  'app-privacy': 'https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy/',
+  'screenshot-coverage': 'https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications/',
+  'account-compliance': 'https://developer.apple.com/help/app-store-connect/manage-agreements/sign-and-update-agreements/',
+  'export-compliance': 'https://developer.apple.com/help/app-store-connect/manage-app-information/overview-of-export-compliance/',
+  'review-guidelines': 'https://developer.apple.com/app-store/review/guidelines/',
+};
 /** Read-only pre-submission report. It lists what is locally verifiable; Apple's own validation still decides. */
 export async function releaseReadiness(api: ReadinessAPI, appId: string, versionId: string, acknowledged: ManualCheckId[] = []): Promise<ReadinessReport> {
   if (![appId, versionId].every(validId)) throw new Error('Invalid app or version ID.');
@@ -46,6 +53,11 @@ export async function releaseReadiness(api: ReadinessAPI, appId: string, version
     if (build.attributes.processingState !== 'VALID') blockers.push(`Attached build is not VALID: ${build.attributes.processingState ?? 'unknown'}.`);
     if (build.attributes.expired === true) blockers.push('Attached build has expired.');
     if (build.attributes.usesNonExemptEncryption === null || build.attributes.usesNonExemptEncryption === undefined) blockers.push('Attached build has no export compliance answer (usesNonExemptEncryption). Fix: build-compliance.');
+    if (build.attributes.usesNonExemptEncryption === true) {
+      const declaration = await optional(api, `/v1/builds/${build.id}/appEncryptionDeclaration`);
+      if (!declaration) blockers.push('Non-exempt encryption build has no attached declaration. Fix: build-encryption-attach.');
+      else if (declaration.attributes.appEncryptionDeclarationState !== 'APPROVED') blockers.push(`Attached encryption declaration is not APPROVED (${declaration.attributes.appEncryptionDeclarationState ?? 'unknown'}).`);
+    }
   }
 
   const versions = await api.list(`/v1/apps/${appId}/appStoreVersions?limit=200`, 2000);
@@ -98,7 +110,7 @@ export async function releaseReadiness(api: ReadinessAPI, appId: string, version
   }
   if (!await optional(api, `/v1/apps/${appId}/appPriceSchedule`)) blockers.push('App price schedule is not set. Fix: app-price-set.');
   if (!await optional(api, `/v1/apps/${appId}/appAvailabilityV2`)) warnings.push('App availability is not set or could not be read. Fix: availability-set.');
-  const manualChecks = manualCheckIds.map(id => ({ id, description: MANUAL_CHECKS[id], acknowledged: acknowledged.includes(id) }));
+  const manualChecks = manualCheckIds.map(id => ({ id, description: MANUAL_CHECKS[id], url: MANUAL_CHECK_URLS[id], acknowledged: acknowledged.includes(id) }));
   return { ready: !blockers.length && manualChecks.every(check => check.acknowledged), automatedReady: !blockers.length,
     appId, versionId, versionString, state, blockers, warnings, manualChecks, notChecked: manualChecks.filter(check => !check.acknowledged).map(check => check.description) };
 }
@@ -122,6 +134,9 @@ async function productReviewItems(api: ReadinessAPI, appId: string, versions: Pr
     for (const row of rows.data) if (requested[relation].has(row.id)) {
       const state = String(row.attributes.state ?? 'UNKNOWN');
       if (![...['PREPARE_FOR_SUBMISSION', 'READY_FOR_REVIEW'], ...(inFlight ? ['WAITING_FOR_REVIEW', 'IN_REVIEW'] : [])].includes(state)) throw new Error(`${relation} ${row.id} cannot be submitted in state ${state}.`);
+      const type = relation === 'inAppPurchaseVersion' ? 'inAppPurchaseVersions' : relation === 'subscriptionVersion' ? 'subscriptionVersions' : 'subscriptionGroupVersions';
+      const localizations = await api.list(`/v1/${type}/${row.id}/localizations?limit=200`, 2000);
+      if (localizations.truncated || !localizations.data.length) throw new Error(`${relation} ${row.id} needs at least one complete localization before review.`);
       found.add(`${relation}:${row.id}`);
     }
   }

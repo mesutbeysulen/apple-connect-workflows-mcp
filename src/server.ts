@@ -109,6 +109,14 @@ export function createServer(service: ConnectService, configPath?: string): McpS
     description: 'One-shot status of a build upload and, once Apple links it, the processed build (processingState VALID/INVALID/FAILED). Use workflow_run with build-wait to poll until done.',
     inputSchema: z.object({ account: z.string(), uploadId: idSchema }).strict(), annotations: read,
   }, async ({ account, uploadId }) => output(await buildStatus(service.api(account), uploadId)));
+  server.registerTool('encryption_declarations_list', {
+    description: 'List an app’s export-compliance declarations and Apple review states. Legal classification must be checked by the operator.',
+    inputSchema: z.object({ account: z.string(), appId: idSchema }).strict(), annotations: read,
+  }, async ({ account, appId }) => output(await service.api(account).list(`/v1/apps/${appId}/appEncryptionDeclarations?limit=200`, 2000)));
+  server.registerTool('build_encryption_status', {
+    description: 'Read the declaration attached to one build, if any, and its Apple approval state.',
+    inputSchema: z.object({ account: z.string(), buildId: idSchema }).strict(), annotations: read,
+  }, async ({ account, buildId }) => output(await service.api(account).get(`/v1/builds/${buildId}/appEncryptionDeclaration`)));
   server.registerTool('beta_feedback_list', {
     description: 'Read TestFlight tester feedback for an app, newest first: screenshot feedback (comment + images) or crash feedback. Contains tester emails and device details; treat as personal data.',
     inputSchema: z.object({ account: z.string(), appId: idSchema, kind: z.enum(['screenshots', 'crashes']), buildId: idSchema.optional(),
@@ -139,6 +147,16 @@ export function createServer(service: ConnectService, configPath?: string): McpS
     description: 'Read-only report of automated blockers and required manual checks. ready stays false until each manual check is explicitly acknowledged. This is an operator attestation, not independent verification.',
     inputSchema: z.object({ account: z.string(), appId: idSchema, versionId: idSchema, manualChecks: z.array(z.enum(manualCheckIds)).default([]) }).strict(), annotations: read,
   }, async ({ account, appId, versionId, manualChecks }) => output(await releaseReadiness(service.api(account), appId, versionId, manualChecks)));
+  server.registerTool('submission_manual_steps', {
+    description: 'Show App Store Connect submission steps that require human verification or are not exposed by the bundled Apple API. Provides official Apple documentation links.',
+    inputSchema: z.object({}).strict(), annotations: { ...read, openWorldHint: false },
+  }, async () => output([
+    { id: 'app-record', title: 'Create the first app record', url: 'https://developer.apple.com/help/app-store-connect/create-an-app-record/add-a-new-app/', reason: 'The Apple API catalog exposes app listing but no app-create endpoint.' },
+    { id: 'app-privacy', title: 'Publish App Privacy answers', url: 'https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy/', reason: 'No App Privacy declaration endpoint is exposed in the bundled Apple API.' },
+    { id: 'agreements', title: 'Accept current agreements and complete tax/banking', url: 'https://developer.apple.com/help/app-store-connect/manage-agreements/sign-and-update-agreements/', reason: 'Account-level agreement acceptance requires an authorized person in App Store Connect.' },
+    { id: 'dsa', title: 'Verify EU Digital Services Act trader status', url: 'https://developer.apple.com/help/app-store-connect/manage-compliance-information/manage-european-union-digital-services-act-trader-requirements/', reason: 'Trader identity verification is an account-level action.' },
+    { id: 'review-messages', title: 'Read and reply to App Review messages', url: 'https://developer.apple.com/help/app-store-connect/manage-submissions-to-app-review/reply-to-app-review-messages', reason: 'The bundled API has customer-review responses but no App Review message endpoint.' },
+  ]));
   server.registerTool('review_submissions_list', {
     description: 'List App Review submissions for an app and their states.',
     inputSchema: z.object({ account: z.string(), appId: idSchema }).strict(), annotations: read,
@@ -172,6 +190,13 @@ export function createServer(service: ConnectService, configPath?: string): McpS
   }, async ({ account, kind, versionId }) => {
     const prefix = kind === 'iap' ? 'inAppPurchaseVersions' : kind === 'subscription' ? 'subscriptionVersions' : 'subscriptionGroupVersions';
     return output(await service.api(account).list(`/v1/${prefix}/${versionId}/localizations?limit=200`, 2000));
+  });
+  server.registerTool('product_version_images', {
+    description: 'List review images attached to an in-app purchase or subscription metadata version.',
+    inputSchema: z.object({ account: z.string(), kind: z.enum(['iap', 'subscription']), versionId: idSchema }).strict(), annotations: read,
+  }, async ({ account, kind, versionId }) => {
+    const prefix = kind === 'iap' ? 'inAppPurchaseVersions' : 'subscriptionVersions';
+    return output(await service.api(account).list(`/v1/${prefix}/${versionId}/images?limit=200`, 2000));
   });
   server.registerTool('subscription_prices_list', {
     description: 'List scheduled and current prices of one subscription.',

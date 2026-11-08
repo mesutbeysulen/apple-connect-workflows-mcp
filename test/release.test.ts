@@ -56,6 +56,15 @@ test('build problems block; first release does not need notes; legacy screenshot
   assert.deepEqual(first.blockers, []); assert.equal(first.automatedReady, true);
   await assert.rejects(releaseReadiness(fakeApi(good({ '/v1/appStoreVersions/v': res('v', 'appStoreVersions', {}, { app: { data: { id: '999', type: 'apps' } } }) })).api, '123', 'v'), /does not belong/);
 });
+test('non-exempt encryption needs an approved declaration attached to the build', async () => {
+  const encrypted = good({ '/v1/appStoreVersions/v/build': res('b', 'builds', { processingState: 'VALID', expired: false, usesNonExemptEncryption: true }) });
+  const absent = await releaseReadiness(fakeApi(encrypted).api, '123', 'v', manualCheckIds);
+  assert(absent.blockers.some(b => /no attached declaration/.test(b)));
+  const pending = await releaseReadiness(fakeApi({ ...encrypted, '/v1/builds/b/appEncryptionDeclaration': res('d', 'appEncryptionDeclarations', { appEncryptionDeclarationState: 'IN_REVIEW' }) }).api, '123', 'v', manualCheckIds);
+  assert(pending.blockers.some(b => /not APPROVED/.test(b)));
+  const approved = await releaseReadiness(fakeApi({ ...encrypted, '/v1/builds/b/appEncryptionDeclaration': res('d', 'appEncryptionDeclarations', { appEncryptionDeclarationState: 'APPROVED' }) }).api, '123', 'v', manualCheckIds);
+  assert.equal(approved.ready, true);
+});
 test('failed placements and abandoned reservations are not screenshots; incomplete lists block', async () => {
   const failed = await releaseReadiness(fakeApi(good({ '/v1/appStoreVersionLocalizations/loc/placements': [res('s', 'p', { placementType: 'APP_SCREENSHOT', state: 'FAILED' })] })).api, '123', 'v');
   assert(failed.blockers.some(b => /tr: no screenshots/.test(b))); assert(failed.warnings.some(w => /failed processing/.test(w)));
@@ -90,10 +99,13 @@ test('release submits only requested product versions that belong to the app', a
   const products = {
     '/v1/apps/123/inAppPurchasesV2': [res('iap', 'inAppPurchases')],
     '/v2/inAppPurchases/iap/versions': [res('iap-v', 'inAppPurchaseVersions', { state: 'PREPARE_FOR_SUBMISSION' })],
+    '/v1/inAppPurchaseVersions/iap-v/localizations': [res('iap-l', 'inAppPurchaseLocalizations', { locale: 'en-US', name: 'Coins' })],
     '/v1/apps/123/subscriptionGroups': [res('group', 'subscriptionGroups')],
     '/v1/subscriptionGroups/group/versions': [res('group-v', 'subscriptionGroupVersions', { state: 'PREPARE_FOR_SUBMISSION' })],
+    '/v1/subscriptionGroupVersions/group-v/localizations': [res('group-l', 'subscriptionGroupLocalizations', { locale: 'en-US', name: 'Pro' })],
     '/v1/subscriptionGroups/group/subscriptions': [res('sub', 'subscriptions')],
     '/v1/subscriptions/sub/versions': [res('sub-v', 'subscriptionVersions', { state: 'PREPARE_FOR_SUBMISSION' })],
+    '/v1/subscriptionVersions/sub-v/localizations': [res('sub-l', 'subscriptionLocalizations', { locale: 'en-US', name: 'Monthly' })],
   };
   const input = { account, appId: '123', versionId: 'v', versionString: '1.2.0', manualChecks: manualCheckIds,
     productVersions: { iap: ['iap-v'], subscription: ['sub-v'], subscriptionGroup: ['group-v'] } };
@@ -109,6 +121,9 @@ test('release submits only requested product versions that belong to the app', a
   const wrongState = fakeApi(withSubmission({ ...products, '/v2/inAppPurchases/iap/versions': [res('iap-v', 'inAppPurchaseVersions', { state: 'APPROVED' })] }));
   await assert.rejects(submitRelease({ ...input, productVersions: { iap: ['iap-v'] } }, wrongState.api), /cannot be submitted/);
   assert.equal(wrongState.writes().length, 0);
+  const noLocale = fakeApi(withSubmission({ ...products, '/v1/inAppPurchaseVersions/iap-v/localizations': [] }));
+  await assert.rejects(submitRelease({ ...input, productVersions: { iap: ['iap-v'] } }, noLocale.api), /needs at least one complete localization/);
+  assert.equal(noLocale.writes().length, 0);
   const groupOnly = fakeApi(withSubmission(products));
   await assert.rejects(submitRelease({ ...input, productVersions: { subscriptionGroup: ['group-v'] } }, groupOnly.api), /at least one subscription version/);
   assert.equal(groupOnly.writes().length, 0);

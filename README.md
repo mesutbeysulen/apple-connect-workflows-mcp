@@ -20,7 +20,7 @@ https://github.com/mesutbeysulen/apple-connect-workflows-mcp — install this MC
 
 | Area | Examples |
 | --- | --- |
-| Apps and versions | List apps and builds; update app information, categories, age rating, availability, version metadata, and review details |
+| Apps and versions | List apps and builds; update app information, categories, age rating, availability, version metadata, review details, and export-compliance documents |
 | Media | Upload and arrange Asset Library screenshots; upload app previews and creative assets; resume interrupted transfers |
 | Builds and TestFlight | Upload IPA/PKG files, monitor processing, manage beta groups and testers, distribute builds, submit beta review |
 | App Review and release | Check readiness, submit versions, manage phased release, publish manual releases, reply to reviews |
@@ -45,26 +45,26 @@ Run `workflow_catalog` in your MCP client for the complete list of CLI workflows
 Use the published version with Node.js 24 or newer:
 
 ```sh
-npx -y apple-connect-workflows-mcp@0.2.0 --help
+npx -y apple-connect-workflows-mcp@0.3.0 --help
 ```
 
 For a team API key, create a local config file. The tool copies the key into a private local directory; pass only its file path:
 
 ```sh
-npx -y apple-connect-workflows-mcp@0.2.0 key-setup \
+npx -y apple-connect-workflows-mcp@0.3.0 key-setup \
   --config "$HOME/.apple-connect-mcp/config.json" \
   --name main --issuer YOUR_ISSUER_UUID \
   --p8 /absolute/path/AuthKey_ABCDEFGHIJ.p8
 ```
 
-For an individual key, replace `--issuer YOUR_ISSUER_UUID` with `--individual`. Register the MCP server with your client using `npx -y apple-connect-workflows-mcp@0.2.0 serve` and `APPLE_CONNECT_CONFIG` set to the config path. For Codex CLI:
+For an individual key, replace `--issuer YOUR_ISSUER_UUID` with `--individual`. Register the MCP server with your client using `npx -y apple-connect-workflows-mcp@0.3.0 serve` and `APPLE_CONNECT_CONFIG` set to the config path. For Codex CLI:
 
 ```sh
 codex mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.2.0 serve
+  npx -y apple-connect-workflows-mcp@0.3.0 serve
 ```
 
-Run `npx -y apple-connect-workflows-mcp@0.2.0 doctor --config "$HOME/.apple-connect-mcp/config.json"` to check the selected account. Accounts start read-only.
+Run `npx -y apple-connect-workflows-mcp@0.3.0 doctor --config "$HOME/.apple-connect-mcp/config.json"` to check the selected account. Accounts start read-only.
 
 ## Manual installation
 
@@ -208,7 +208,11 @@ Get `PLACEMENT_GROUP` from `asset_placements_list` or `asset_ref_data`; do not g
 
 `release-check` reports automated blockers and five manual attestations. Its `ready` field remains false until the operator confirms App Privacy, screenshot coverage, account compliance, export compliance, and review readiness with `--manual-checks app-privacy,screenshot-coverage,account-compliance,export-compliance,review-guidelines`. Acknowledgment records the operator's check; it does not verify the App Store Connect website. `release-submit` requires these checks and the exact version string. Include `--iap-version-ids`, `--subscription-version-ids`, or `--subscription-group-version-ids` to send product metadata versions in the same review submission. The tool verifies that each product version belongs to the app before writing.
 
-For version-based product metadata, use `product-version-create` and `product-version-localize`; discover IDs through the `product_versions_list` and `product_version_localizations` MCP tools. The older `product-localize` command uses Apple's earlier product-level metadata model.
+`submission_manual_steps` lists the App Store Connect tasks that the Apple API does not expose or that require an authorized human, with official Apple links. This includes creating the first app record, publishing App Privacy answers, accepting account agreements, verifying EU trader status, and replying to App Review messages. `review-reply` handles customer reviews, which are a different API resource.
+
+For builds using non-exempt encryption, `release-check` also requires an Apple-approved encryption declaration attached to the build. Use `encryption_declarations_list` and `build_encryption_status` to inspect Apple's state. The write sequence is `encryption-declaration-create`, `encryption-document-upload` when documentation is required, then `build-encryption-attach` after Apple approves the declaration. These commands cannot determine the correct legal answers; consult [Apple's export-compliance guidance](https://developer.apple.com/help/app-store-connect/manage-app-information/overview-of-export-compliance/) before entering them.
+
+For version-based product metadata, use `product-version-create`, `product-version-localize`, and `product-version-image-upload` for an IAP or subscription review image. Discover IDs through the `product_versions_list`, `product_version_localizations`, and `product_version_images` MCP tools. The older `product-localize` command uses Apple's earlier product-level metadata model.
 
 ## Operational notes
 

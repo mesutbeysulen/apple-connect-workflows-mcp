@@ -10,12 +10,14 @@ import { screenshotClient, uploadScreenshot, resumeScreenshot } from './screensh
 import { distributeToGroups } from './testflight.js';
 import { waitForBuild } from './build-status.js';
 import { uploadBuild, resumeBuild, cancelBuildUpload } from './build-upload.js';
+import { createEncryptionDeclaration, uploadEncryptionDocument, attachEncryptionDeclaration } from './export-compliance.js';
 import { uploadAsset, resumeAsset, orderPlacements, IMAGE_PLACEMENT_TYPES, type ImagePlacementType } from './asset-library.js';
 import { createScreenshotSet, orderScreenshots } from './screenshot-sets.js';
 import { cleanupStaleAssets } from './asset-cleanup.js';
 import { uploadCreative, resumeCreative, submitCreatives, placeCreative, removeCreativePlacement, parseTargets, type CreativeKind } from './creative-assets.js';
 import { releaseReadiness, submitRelease, publishRelease, manualCheckIds, type ManualCheckId } from './release.js';
 import { createIap, createSubscription, createSubscriptionGroup, createProductVersion, localizeProduct, localizeProductVersion, setAppPrice, setIapPrice, setSubscriptionPrice, type ProductKind } from './commercial.js';
+import { uploadProductVersionImage } from './product-images.js';
 import { downloadSales, requestAnalytics, downloadAnalytics } from './reports.js';
 import { createWebhook, deleteWebhook, pingWebhook, redeliverWebhook, setWebhookEnabled, webhookReceiver, webhookSecret } from './webhooks.js';
 import { setupKey } from './key-setup.js';
@@ -48,6 +50,9 @@ const HELP = `apple-connect-mcp <command> [--config /absolute/config.json]
   version-update --account NAME --app ID --version ID [--copyright TEXT] [--release-type TYPE] [--release-date ISO] [--version-string 1.2.3]
   version-build-set --account NAME --app ID --version ID --build ID
   build-compliance --account NAME --app ID --build ID --uses-encryption true|false
+  encryption-declaration-create --account NAME --app ID --app-description TEXT --proprietary-crypto true|false --third-party-crypto true|false --french-store true|false
+  encryption-document-upload --account NAME --app ID --declaration ID --file /absolute/document.pdf
+  build-encryption-attach --account NAME --app ID --declaration ID --build ID
   version-localize --account NAME --app ID --version ID --locale tr [--description TEXT] [--keywords TEXT] [--whats-new TEXT] [--promotional-text TEXT] [--support-url URL] [--marketing-url URL]
   metadata-sync --account NAME --app ID --version ID --file /absolute/metadata.json [--execute]
   screenshots-sync --account NAME --app ID --version ID --dir /absolute/shots [--replace] [--execute]
@@ -98,6 +103,7 @@ const HELP = `apple-connect-mcp <command> [--config /absolute/config.json]
   product-localize --account NAME --app ID (--iap ID | --subscription ID) --locale tr --name TEXT [--description TEXT]
   product-version-create --account NAME --app ID --kind iap|subscription|subscription-group --product ID
   product-version-localize --account NAME --app ID --kind iap|subscription|subscription-group --product ID --version ID --locale en-US --name TEXT [--description TEXT] [--custom-app-name TEXT]
+  product-version-image-upload --account NAME --app ID --kind iap|subscription --product ID --version ID --file /absolute/image.png
   app-price-set --account NAME --app ID --territory USA --price 4.99 [--start-date YYYY-MM-DD] [--execute]
   iap-price-set --account NAME --app ID --iap ID --territory USA --price 4.99 [--start-date YYYY-MM-DD] [--execute]
   subscription-price-set --account NAME --app ID --subscription ID --territory USA --price 4.99
@@ -143,6 +149,7 @@ const options = {
   'primary-locale': { type: 'string' }, 'content-rights': { type: 'string' }, subtitle: { type: 'string' }, 'privacy-url': { type: 'string' }, 'privacy-choices-url': { type: 'string' }, 'privacy-text': { type: 'string' },
   primary: { type: 'string' }, 'primary-sub1': { type: 'string' }, 'primary-sub2': { type: 'string' }, secondary: { type: 'string' }, 'secondary-sub1': { type: 'string' }, 'secondary-sub2': { type: 'string' },
   territories: { type: 'string' }, 'new-territories': { type: 'boolean' }, platform: { type: 'string' }, copyright: { type: 'string' }, 'release-type': { type: 'string' }, 'release-date': { type: 'string' }, 'uses-encryption': { type: 'string' },
+  declaration: { type: 'string' }, 'app-description': { type: 'string' }, 'proprietary-crypto': { type: 'string' }, 'third-party-crypto': { type: 'string' }, 'french-store': { type: 'string' },
   keywords: { type: 'string' }, 'whats-new': { type: 'string' }, 'promotional-text': { type: 'string' }, 'support-url': { type: 'string' }, 'marketing-url': { type: 'string' }, dir: { type: 'string' },
   'first-name': { type: 'string' }, 'last-name': { type: 'string' }, phone: { type: 'string' }, email: { type: 'string' }, notes: { type: 'string' }, 'demo-required': { type: 'string' }, 'demo-name': { type: 'string' },
   submission: { type: 'string' }, item: { type: 'string' }, state: { type: 'string' }, 'feedback-email': { type: 'string' }, 'public-link': { type: 'boolean' }, feedback: { type: 'boolean' }, emails: { type: 'string' }, tester: { type: 'string' }, review: { type: 'string' }, text: { type: 'string' }, identifier: { type: 'string' }, individual: { type: 'boolean' },
@@ -243,6 +250,17 @@ const commands: Record<string, Handler> = {
   'version-update': async (v, { account }) => { const a = required(v, 'app', 'version'); const acc = account(); return prep.updateVersion({ account: acc, appId: a.app, versionId: a.version, copyright: v.copyright, releaseType: v['release-type'], earliestReleaseDate: v['release-date'], versionString: v['version-string'] }, screenshotClient(acc)); },
   'version-build-set': async (v, { account }) => { const a = required(v, 'app', 'version', 'build'); const acc = account(); return prep.attachBuild({ account: acc, appId: a.app, versionId: a.version, buildId: a.build }, screenshotClient(acc)); },
   'build-compliance': async (v, { account }) => { const a = required(v, 'app', 'build', 'uses-encryption'); const acc = account(); return prep.setBuildEncryption({ account: acc, appId: a.app, buildId: a.build, usesNonExemptEncryption: yesNo(a['uses-encryption'], '--uses-encryption')! }, screenshotClient(acc)); },
+  'encryption-declaration-create': async (v, { account }) => {
+    const a = required(v, 'app', 'app-description', 'proprietary-crypto', 'third-party-crypto', 'french-store');
+    const acc = account();
+    return createEncryptionDeclaration({ account: acc, appId: a.app, appDescription: a['app-description'],
+      containsProprietaryCryptography: yesNo(a['proprietary-crypto'], '--proprietary-crypto')!,
+      containsThirdPartyCryptography: yesNo(a['third-party-crypto'], '--third-party-crypto')!, availableOnFrenchStore: yesNo(a['french-store'], '--french-store')! }, screenshotClient(acc));
+  },
+  'encryption-document-upload': async (v, { account }) => { const a = required(v, 'app', 'declaration', 'file'); const acc = account();
+    return uploadEncryptionDocument({ account: acc, appId: a.app, declarationId: a.declaration, filePath: a.file }, screenshotClient(acc)); },
+  'build-encryption-attach': async (v, { account }) => { const a = required(v, 'app', 'declaration', 'build'); const acc = account();
+    return attachEncryptionDeclaration({ account: acc, appId: a.app, declarationId: a.declaration, buildId: a.build }, screenshotClient(acc)); },
   'version-localize': async (v, { account }) => { const a = required(v, 'app', 'version', 'locale'); const acc = account(); return prep.setVersionLocale({ account: acc, appId: a.app, versionId: a.version, locale: a.locale, description: v.description, keywords: v.keywords, whatsNew: v['whats-new'], promotionalText: v['promotional-text'], supportUrl: v['support-url'], marketingUrl: v['marketing-url'] }, screenshotClient(acc)); },
   'metadata-sync': async (v, { account }) => { const a = required(v, 'app', 'version', 'file'); const acc = account(); return syncMetadata({ account: acc, appId: a.app, versionId: a.version, metadata: await readMetadataFile(a.file), execute: v.execute === true }, screenshotClient(acc)); },
   'screenshots-sync': async (v, { store, account }) => { const a = required(v, 'app', 'version', 'dir'); const acc = account(); return syncScreenshots({ account: acc, appId: a.app, versionId: a.version, dir: a.dir, replace: v.replace === true, execute: v.execute === true }, screenshotClient(acc), store); },
@@ -344,6 +362,12 @@ const commands: Record<string, Handler> = {
     return localizeProductVersion({ account: acc, appId: a.app, kind: a.kind as ProductKind, productId: a.product, versionId: a.version, locale: a.locale,
       name: a.name, description: v.description, customAppName: v['custom-app-name'] }, screenshotClient(acc));
   },
+  'product-version-image-upload': async (v, { account }) => {
+    const a = required(v, 'app', 'kind', 'product', 'version', 'file');
+    if (a.kind !== 'iap' && a.kind !== 'subscription') throw new Error('--kind must be iap or subscription.');
+    const acc = account();
+    return uploadProductVersionImage({ account: acc, appId: a.app, kind: a.kind, productId: a.product, versionId: a.version, filePath: a.file }, screenshotClient(acc));
+  },
   'app-price-set': async (v, { account }) => {
     const a = required(v, 'app', 'territory', 'price');
     const acc = account();
@@ -397,6 +421,7 @@ const commands: Record<string, Handler> = {
 const WRITES: Record<string, Capability> = {
   apply: 'upload', 'api-apply': 'admin', 'bundle-id-create': 'admin', 'app-update': 'upload', 'app-info-set': 'upload', 'app-category-set': 'upload', 'age-rating-set': 'upload', 'availability-set': 'commercial',
   'version-create': 'upload', 'version-update': 'upload', 'version-build-set': 'upload', 'build-compliance': 'upload', 'version-localize': 'upload', 'metadata-sync': 'upload', 'screenshots-sync': 'upload', 'preview-upload': 'upload', 'preview-place': 'upload',
+  'encryption-declaration-create': 'upload', 'encryption-document-upload': 'upload', 'build-encryption-attach': 'upload',
   'review-detail-set': 'upload', 'review-attachment-upload': 'upload', 'review-cancel': 'review', 'review-item-remove': 'review', 'phased-release': 'release',
   'beta-info-set': 'upload', 'beta-notes-set': 'upload', 'beta-review-detail-set': 'upload', 'beta-submit': 'review', 'beta-group-create': 'admin', 'beta-tester-add': 'admin', 'beta-tester-remove': 'admin', 'review-reply': 'admin',
   'asset-upload': 'upload', 'asset-resume': 'upload', 'asset-order': 'upload', 'asset-cleanup': 'upload',
@@ -405,7 +430,7 @@ const WRITES: Record<string, Capability> = {
   'creative-upload': 'upload', 'creative-resume': 'upload', 'creative-place': 'upload', 'creative-remove': 'upload',
   'creative-submit': 'review', 'release-submit': 'review', 'release-publish': 'release',
   'iap-create': 'commercial', 'subscription-group-create': 'commercial', 'subscription-create': 'commercial', 'product-localize': 'commercial',
-  'product-version-create': 'commercial', 'product-version-localize': 'commercial',
+  'product-version-create': 'commercial', 'product-version-localize': 'commercial', 'product-version-image-upload': 'commercial',
   'app-price-set': 'commercial', 'iap-price-set': 'commercial', 'subscription-price-set': 'commercial',
   'analytics-request': 'admin', 'webhook-create': 'admin', 'webhook-enable': 'admin', 'webhook-disable': 'admin', 'webhook-ping': 'admin', 'webhook-delete': 'admin', 'webhook-redeliver': 'admin',
 };
