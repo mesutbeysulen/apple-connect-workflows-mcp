@@ -1,9 +1,31 @@
 {
   "name": "apple-connect-workflows-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "Local App Store Connect MCP for release, TestFlight, assets, commerce, analytics and workflow plans",
+  "keywords": [
+    "app-store-connect",
+    "mcp",
+    "model-context-protocol",
+    "testflight",
+    "apple"
+  ],
+  "author": "Mesut Beysülen",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mesutbeysulen/apple-connect-workflows-mcp.git"
+  },
+  "homepage": "https://github.com/mesutbeysulen/apple-connect-workflows-mcp#readme",
+  "bugs": "https://github.com/mesutbeysulen/apple-connect-workflows-mcp/issues",
+  "files": [
+    "dist",
+    "catalog",
+    "README.md",
+    "AGENTS.md",
+    "LICENSE",
+    "config.example.json"
+  ],
   "engines": {
     "node": ">=24.0.0"
   },
@@ -12,6 +34,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepack": "npm run build",
     "check": "tsc --noEmit",
     "test": "npm run build && tsx --test test/*.test.ts",
     "start": "node dist/cli.js serve",

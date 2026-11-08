@@ -24,7 +24,17 @@ Run `workflow_catalog` in your MCP client for the complete list of CLI workflows
 - An App Store Connect API key (`.p8`) with the permissions required for the operations you intend to use.
 - A local MCP client that can launch a stdio server.
 
-## Install
+## Install with an assistant
+
+If your assistant can access this private repository and run commands on your machine, give it this prompt:
+
+```text
+Install https://github.com/mesutbeysulen/apple-connect-workflows-mcp for my MCP client. Read AGENTS.md and complete the local setup. Keep the account read-only.
+```
+
+[AGENTS.md](AGENTS.md) guides the assistant through building the server, configuring an API key by file path, checking connectivity, and registering the MCP client. It does not need the contents of your `.p8` key in chat. The repository must be accessible to the assistant. This route uses a local checkout; the package is not yet available through `npx`.
+
+## Manual installation
 
 ```sh
 git clone https://github.com/mesutbeysulen/apple-connect-workflows-mcp.git
@@ -79,6 +89,13 @@ Use the absolute paths on your machine in your client's stdio server configurati
 ```
 
 Restart the client after adding the server. Call `accounts_list` to confirm that the config loaded, then `account_check` to test the selected account. If your client uses a different configuration format, supply the same command, arguments, and environment variable.
+
+For Codex CLI, you can register the same server without editing TOML manually:
+
+```sh
+codex mcp add apple-connect --env APPLE_CONNECT_CONFIG="$PWD/config.local.json" -- \
+  node "$PWD/dist/cli.js" serve
+```
 
 ## Allow writes
 
