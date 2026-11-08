@@ -2,6 +2,13 @@ node_modules/
 dist/
 .env*
 *.p8
+*.pem
+*.p12
+*.pfx
+*.mobileprovision
 *.sqlite*
-config.local.json
+config.*.json
+!config.example.json
+*.tsv
+*.csv
 .DS_Store

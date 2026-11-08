@@ -8,6 +8,11 @@ analitik raporları, webhook'lar, anahtar kurulumu, yerel yetkiler ve API katalo
 Bu proje magaza-mcp analizinden hareketle sıfırdan geliştirilmiştir; onun fork'u değildir.
 Apple ile bağlantılı resmi bir ürün değildir. Henüz npm'e yayımlanmaz (`private: true`).
 
+## Lisans
+
+[MIT](LICENSE). Bu ilk sürümde gerçek Apple hesabıyla uçtan uca doğrulama yapılmadı;
+deneme uygulamasında başlayın.
+
 ## Çalışan kapsam
 
 | Araç | İşlev |
@@ -42,11 +47,32 @@ Apple ile bağlantılı resmi bir ürün değildir. Henüz npm'e yayımlanmaz (`
 | `api_catalog_search`, `api_read` | API kataloğunda arama ve katalogdaki herhangi bir GET ucunu okuma |
 | `metadata_plan` | Açıklama, sürüm notu, anahtar kelime ve promosyon metni için önce/sonra planı |
 | `plan_get` | Plan, SHA-256 özeti, süre ve yürütme durumu |
+| `workflow_catalog` | MCP üzerinden kullanılabilen CLI iş akışları ve gereken yetki sınıfları |
+| `workflow_run` | Salt okuma, build bekleme ve rapor indirme komutları |
+| `workflow_prepare`, `workflow_plan_get`, `workflow_apply` | Yazma işlemini planla, incele ve tek sefer uygula |
 
-Plan oluşturmak Apple'a yazmaz; yerel SQLite'a kaydeder. MCP'de apply aracı yoktur.
-İlk sürümde uygulama yetkisi CLI sınırında tutulur. Shell erişimi olan bir asistanın CLI'yi
-çalıştırması yine kullanıcının açık işlem talebine veya host onayına dayanmalıdır; CLI tek başına
-bir kişinin kimliğini doğrulamaz. Digest, gösterilen içerikle uygulanan içeriği eşler.
+Plan oluşturmak Apple'a yazmaz; yerel SQLite'a kaydeder. `workflow_prepare`, mümkün olan
+komutlarda Apple verisine dayalı önizleme üretir; diğerlerinde yalnızca gönderilecek girdileri
+gösterir. `workflow_apply`, 30 dakika geçerli planın SHA-256 özetini ister ve planı bir kez
+çalıştırır. Belirsiz sonuçlanan işlemler otomatik tekrar edilmez; durumu Apple'dan kontrol edip
+yeni plan hazırlayın. Dosya veya klasör girdileri değişirse uygulama reddedilir. CLI'nin yerel
+operatör yetkileri, hesap/uygulama izinleri, kilidi ve denetim kaydı aynen uygulanır. MCP host'unun
+kullanıcı onayı ayrıca yapılandırılmalıdır; özet tek başına insan onayı kanıtı değildir.
+
+`key-setup` ve `webhook-listen` sunucu kurulumu/arka plan işlemi olduğu için MCP akışına dahil
+değildir. Genel API okuma ve yazma planları mevcut `api_read`, `api_write_plan` ve
+`workflow_prepare` üzerinden `api-apply` ile yürütülür.
+
+Örnek MCP yazma akışı:
+
+```json
+{"command":"version-localize","args":{"account":"main","app":"123456789","version":"VERSION_ID","locale":"tr-TR","whats-new":"Yeni özellikler"}}
+```
+
+Bu girdiyi `workflow_prepare` aracına verin. Dönen `id` ve `digest` değerlerini
+`workflow_plan_get` ile inceleyin; sonra `workflow_apply` aracına
+`{"planId":"ID","digest":"SHA256"}` verin. `workflow_catalog` tüm komut adlarını listeler;
+argüman anahtarları CLI'deki `--` işareti olmadan yazılır.
 
 ## Kurulum
 
@@ -55,16 +81,25 @@ Node.js **24 veya üstü** gerekir (`node:sqlite`).
 ```sh
 npm ci
 npm run build
-cp config.example.json config.local.json
 ```
 
-`config.local.json` içindeki mutlak yolları ve Apple **team API key** bilgilerini düzenleyin.
-`.p8` içeriğini config'e veya sohbete yapıştırmayın; yalnızca dosya yolunu girin.
-Anahtarın bulunduğu dosyayı ve veri klasörünü yalnızca kendi kullanıcınıza erişilebilir tutun.
-Bu sürüm Keychain aktarımı veya individual API key desteklemez.
+App Store Connect API anahtarınızın `.p8` dosyasını ve **team** anahtarı için issuer ID'yi
+hazırlayın. `key-setup` anahtarı yalnızca sizin okuyabileceğiniz bir klasöre kopyalar ve
+`config.local.json` dosyasını oluşturur. Dosya adınız `AuthKey_XXXXXXXXXX.p8` biçiminde değilse
+`--key-id XXXXXXXXXX` ekleyin. İlk kurulum yazma izni olmadan başlar:
 
 ```sh
-export APPLE_CONNECT_CONFIG="/absolute/path/to/config.local.json"
+node dist/cli.js key-setup --config "$PWD/config.local.json" --name main \
+  --issuer ISSUER_UUID --p8 /absolute/path/AuthKey_ABCDEFGHIJ.p8
+```
+
+**Individual API key** için `--issuer ISSUER_UUID` yerine `--individual` verin.
+Elle yapılandırmayı tercih ederseniz `cp config.example.json config.local.json` çalıştırıp
+örnek issuer ID, key ID ve tüm mutlak yolları gerçek değerlerle değiştirin.
+`.p8` içeriğini config'e veya sohbete yapıştırmayın. Keychain aktarımı desteklenmez.
+
+```sh
+export APPLE_CONNECT_CONFIG="$PWD/config.local.json"
 node dist/cli.js doctor
 node dist/cli.js serve
 ```
@@ -73,7 +108,7 @@ node dist/cli.js serve
 anlamına gelmez. `serve` stdout'u sadece MCP protokolü için kullanır.
 
 MCP istemcinize sunucu tanımlarken çalıştırılabilir dosya olarak `node`, argüman olarak
-`/absolute/path/to/apple-store-preview/dist/cli.js`, `serve` verin. JSON konfigürasyon kullanan
+`/absolute/path/to/apple-connect-workflows-mcp/dist/cli.js`, `serve` verin. JSON konfigürasyon kullanan
 istemciler için örnek:
 
 ```json
@@ -81,12 +116,17 @@ istemciler için örnek:
   "mcpServers": {
     "apple-connect": {
       "command": "node",
-      "args": ["/absolute/path/to/apple-store-preview/dist/cli.js", "serve"],
-      "env": { "APPLE_CONNECT_CONFIG": "/absolute/path/to/config.local.json" }
+      "args": ["/absolute/path/to/apple-connect-workflows-mcp/dist/cli.js", "serve"],
+      "env": { "APPLE_CONNECT_CONFIG": "/absolute/path/to/apple-connect-workflows-mcp/config.local.json" }
     }
   }
 }
 ```
+
+JSON örneğindeki iki mutlak yolu kendi makinenizdeki gerçek yollarla değiştirin. `npm run build`
+sonrası `dist/cli.js` oluşmalıdır. MCP istemcisini baştan başlatın; `accounts_list` ile hesabın
+göründüğünü ve `account_check` ile Apple erişimini doğrulayın. `doctor` ve `account_check` yalnızca
+uygulama listeleme erişimini doğrular; her Apple API yetkisini doğrulamaz.
 
 İstemciyi bu projeden farklı bir çalışma dizininde başlatabilirsiniz; tüm yapılandırma yolları mutlaktır.
 İstemcinin farklı bir config formatı varsa aynı komut, argüman ve ortam değişkenlerini kullanın.
@@ -142,9 +182,10 @@ veya `asset_ref_data` ile Apple referans verisinden alın. Yerel olarak sadece b
 ```sh
 node dist/cli.js asset-upload --account main --app 1234567890 \
   --version REAL_VERSION_ID --localization REAL_LOCALIZATION_ID \
-  --placement-group REAL_GROUP --file /absolute/path/to/screenshot.png \
-  [--placement-type APP_SCREENSHOT] [--reference-name "Ana ekran"]
+  --placement-group REAL_GROUP --file /absolute/path/to/screenshot.png
 ```
+
+İsteğe bağlı bayraklar: `--placement-type APP_SCREENSHOT` ve `--reference-name "Ana ekran"`.
 
 Komut sürüm/uygulama/lokalizasyon ilişkisini ve düzenlenebilir durumu doğrular, PNG/JPEG imzasını
 kontrol eder, `APP_SCREENSHOTS_AND_PREVIEWS` kategorisinde rezervasyon açar, rezervasyonu SQLite'a
@@ -174,9 +215,11 @@ node dist/cli.js asset-order --account main --app 1234567890 --version REAL_VERS
 ### Yarım kalmış rezervasyonların temizlenmesi
 
 ```sh
-node dist/cli.js asset-cleanup --account main --app 1234567890 [--older-than-hours 24]
+node dist/cli.js asset-cleanup --account main --app 1234567890
 node dist/cli.js asset-cleanup --account main --app 1234567890 --execute
 ```
+
+Eşiği değiştirmek için ilk komuta `--older-than-hours 24` ekleyin.
 
 Varsayılan kuru çalıştırmadır; sadece adayları listeler (MCP'de `asset_cleanup_preview`). Aday:
 `AWAITING_UPLOAD` veya `FAILED` durumunda, eşik süresinden eski ve hiçbir yere yerleşmemiş Asset
@@ -184,8 +227,8 @@ Library görseli. Eski `appScreenshots` rezervasyonlarından yalnızca bu aracı
 oluşturma zamanıyla yazılmış olanlar değerlendirilir. `--execute` yazma izni ister ve her adayı
 silmeden hemen önce tekrar okur; durum değiştiyse veya görsel yerleştiyse atlar. Apple'ın
 verdiği oluşturma tarihi yoksa görsel silinmez. Apple'ın yardım sayfası yalnızca *Prepared for
-Submission* durumundaki varlıkların silinebildiğini söylüyor; Apple bir adayı reddederse rapordaki
-`skipped` listesinde nedeniyle görünür. Videolar da aynı kurallarla temizlenir.
+Submission* durumundaki varlıkların silinebildiğini söylüyor; Apple silmeyi reddederse varlık arşivlenir ve
+rapordaki `archived` listesinde görünür. Videolar da aynı kurallarla temizlenir.
 
 ## Header ve Search Results
 
@@ -213,8 +256,10 @@ node dist/cli.js creative-place --account main --app 1234567890 --version REAL_V
 - `creative-submit` tek başına inceleme gönderimidir, yeni sürüm gerektirmez. Apple'da bekleyen taslakta
   başka öğeler varsa göndermez, çünkü onları da incelemeye yollamış olurdu. Tekrar çalıştırmak güvenlidir.
 - `creative-place` zaten yerleşmiş varlığı tekrar yerleştirmez. O konumda başka varlık varsa `--replace`
-  olmadan değiştirmez. `--replace` önce eskisini kaldırır; yeni yerleşim başarısız olursa hata kaldırılan
-  yerleşimleri yazar. Varlıklar kütüphanede kalır.
+  olmadan değiştirmez. `--replace` önce yenisini eklemeyi dener, sonra eskisini kaldırır. Apple yer sınırı
+  nedeniyle reddederse eskisini kaldırıp yeniden dener; yine başarısız olursa eskisini geri yerleştirmeyi dener ve
+  sonucu yazar. Sonucu belirsiz bir hatada (bağlantı kopması gibi) eskisine dokunmaz. Birden çok yerleşim
+  varsa `--placement-group` ister. Varlıklar kütüphanede kalır.
 - Düzenlenebilir olmayan (örn. yayındaki) sürüm yalnızca `APPROVED` varlık kabul eder; komut bunu yazmadan önce söyler.
 - `creative-remove` yerleşimi kaldırır, varlığı silmez. `--placement-group` isteğe bağlıdır.
 - Custom Product Page, ürün sayfası optimizasyonu ve in-app event yerleşimleri bu sürümde yoktur.
@@ -259,14 +304,16 @@ build ID'sini bulun. TestFlight dağıtım komutu bu işlenmiş build ID'sini is
 
 Yükleme SQLite'a kaydedilir ve gönderilen her parça işaretlenir. Aynı sürüm ve build için Apple'da
 başarısız olmayan bir yükleme varsa komut yeni rezervasyon açmaz. Kesintide kalan parçalardan devam edin,
-ardından işlenmeyi izleyin:
+ardından işlenmeyi izleyin. Yerel kaydı olmayan takılı bir rezervasyonu `build-cancel` kaldırır:
 
 ```sh
 node dist/cli.js build-resume --account main --upload REAL_UPLOAD_ID
+node dist/cli.js build-cancel --account main --app 1234567890 --upload REAL_UPLOAD_ID
 node dist/cli.js build-wait --account main --upload REAL_UPLOAD_ID --timeout-minutes 60
 ```
 
-`build-resume` dosyanın değişmediğini SHA-256 ile doğrular. Apple'ın imzalı adreslerinin süresi dolduysa
+`build-resume` dosyanın değişmediğini SHA-256 ile doğrular. Bir parçayı ancak aynı oturuma ve aynı sınırlarla
+gönderilmişse atlar; Apple adresleri yeniden verirse parçayı yeniden gönderir. Apple'ın imzalı adreslerinin süresi dolduysa
 hata verir. `build-wait` salt okunurdur; build `VALID`, `INVALID` veya `FAILED` olana ya da süre dolana kadar
 bekler ve build ID'sini yazar. Komut hazır `.ipa` dosyasını taşır; Xcode derleme, imzalama veya IPA içindeki
 sürümün argümanlarla eşleşmesini doğrulama görevini üstlenmez.
@@ -302,9 +349,11 @@ yaş derecesi, gizlilik adresi, içerik hakları ve fiyat için engelleri listel
 App Privacy etiketleri ve her cihaz boyutunun kapsamı kontrol edilemez; rapor bunları `notChecked` altında
 açıkça yazar. Temiz rapor Apple'ın kabul edeceği anlamına gelmez.
 
-`release-submit` engel varsa veya `--version-string` sürümle eşleşmiyorsa göndermez. `release-publish` yalnızca
+`release-submit` engel varsa veya `--version-string` sürümle eşleşmiyorsa göndermez. Reddedilen bir sürüm
+düzeltildikten sonra aynı komutla mevcut gönderim üzerinden yeniden gönderilir (`resubmitted`); bu davranış
+canlıda doğrulanmadı. Cevabı kaybolan gönderimde tekrar çalıştırmak `already_submitted` döner. `release-publish` yalnızca
 `PENDING_DEVELOPER_RELEASE` durumundaki sürümü yayınlar ve **geri alınamaz**; zaten yayındaysa yazmaz.
-Kademeli yayın ayarı bu sürümde yoktur.
+Kademeli yayın durumu `phased-release` komutuyla ayarlanabilir.
 
 ## IAP, abonelik ve fiyat
 
@@ -318,7 +367,8 @@ node dist/cli.js iap-price-set --account main --app 1234567890 --iap IAP_ID --te
 
 Oluşturma komutları aynı ürün varsa yeniden oluşturmaz. Fiyat komutları (`app-price-set`, `iap-price-set`,
 `subscription-price-set`) `--execute` verilmedikçe yalnızca önizleme gösterir. Fiyat, Apple'ın fiyat
-noktalarıyla birebir eşleşmelidir; eşleşmezse yuvarlamaz, en yakın değerleri listeler. Uygulama ve IAP fiyat
+noktalarıyla birebir eşleşmelidir; eşleşmezse yuvarlamaz, en yakın değerleri listeler. Çıktının `current` alanı
+değiştirilecek fiyatları gösterir, bu çıktıyı saklayın. Uygulama ve IAP fiyat
 planı gönderimi **mevcut manuel planın tamamını değiştirir**. Abonelikte `--preserve-current-price` mevcut
 aboneleri eski fiyatta tutar. Bu komutlar ürünleri incelemeye göndermez.
 
@@ -333,24 +383,26 @@ node dist/cli.js analytics-download --account main --app 1234567890 --report-nam
 ```
 
 Raporlar tek TSV dosyasında birleştirilir: farklı sütunlar korunur, her satıra kaynak dönem sütunu eklenir,
-dosya yalnızca sahibine açık yazılır. Apple'da verisi olmayan dönemler `missing` altında listelenir. Analitik
+dosya yalnızca sahibine açık yazılır. Apple'da verisi olmayan dönemler `missing` altında listelenir; hiç veri
+yoksa dosya yazılmaz, mevcut dosya korunur. Hata ortasında biten dönemler `ÇIKTI.partial` dosyasına kaydedilir.
+Aynı tarih birden çok rapor isteğinde varsa `ONGOING` kullanılır, böylece toplamlar iki kez sayılmaz. Analitik
 parçaları MD5 ile doğrulanır. Yeni analitik isteğinin ilk verisi bir gün veya daha geç gelebilir. Finans
 raporları bu sürümde yoktur.
 
 ## Ekip kullanımı
 
-**Anahtar kurulumu:** `.p8` dosyasını doğrular, `~/.apple-connect-mcp/keys` altına yalnızca size açık kopyalar
-ve hesabı config'e ekler. `--allow-app` verilmezse hesap salt okunur başlar. Anahtar içeriği yazdırılmaz.
-Keychain desteği yoktur.
-
-```sh
-node dist/cli.js key-setup --config /absolute/path/config.local.json --name main \
-  --issuer ISSUER_UUID --p8 /absolute/path/AuthKey_ABCDEFGHIJ.p8 --allow-app 1234567890
-```
+**Anahtar kurulumu:** Yukarıdaki `key-setup` komutu `.p8` dosyasını doğrular,
+`~/.apple-connect-mcp/keys` altına yalnızca size açık kopyalar ve hesabı config'e ekler.
+İlk kurulumda `--allow-app 1234567890` eklerseniz hesap bu uygulama için yazmaya açılır.
+Hesabı zaten kurduysanız aynı `--name` ile `key-setup` komutunu tekrar çalıştırmayın;
+`config.local.json` içinde `readOnly` değerini `false`, `allowedAppIds` değerini ilgili
+uygulama ID'leri yapın. Anahtar içeriği yazdırılmaz. Keychain desteği yoktur.
 
 **Yerel yetkiler:** Config'e `operators` eklenirse Apple'a yazan CLI komutları işletim sistemi kullanıcısına
 göre sınırlanır. Yetkiler: `upload`, `review`, `release`, `commercial`, `admin`. `operators` yoksa davranış
-değişmez. Bu **kimlik doğrulama değildir**: config'i değiştirebilen veya anahtarı okuyabilen biri atlayabilir.
+değişmez. Bu **kimlik doğrulama değildir**: anahtarı okuyabilen biri `--config` veya `APPLE_CONNECT_CONFIG` ile
+`operators` içermeyen başka bir dosya göstererek kuralı atlayabilir. Gerçek ayrım için anahtarı işletim sistemi
+izinleriyle koruyun.
 Uzak veya sunucu tabanlı çok kullanıcılı erişim yoktur. Yazma komutları `audit` komutuyla okunan yerel bir
 kayda düşer.
 
@@ -361,7 +413,13 @@ kayda düşer.
 ] }
 ```
 
+**Eşzamanlı yazma:** Apple'a yazan her CLI komutu hesap ve uygulama başına aynı kilidi tutar. Aynı veritabanını
+kullanan ikinci bir yazma, ilki bitene kadar hata ile reddedilir; paralel yükleme yerine sırayla çalıştırın.
+
+**Gizli alanlar:** MCP çıktılarında parola, demo hesap adı, gizli değer, sertifika ve profil içerikleri `[redacted]` olur.
+
 **Webhook'lar:** Gizli değer yalnızca `APPLE_WEBHOOK_SECRET` ortam değişkeninden okunur (en az 16 karakter).
+Aynı ad ve adresle `webhook-create` yeniden çalışırsa gizli değeri günceller (`secret_updated`).
 `webhook-listen` `127.0.0.1` üzerinde dinler, imzası (`x-apple-signature`) doğrulanan olayları SQLite'a yazar;
 HTTPS tüneli veya proxy sizin kurulumunuzdur. İmzanın ham gövde üzerinden hesaplandığı varsayılmıştır; Apple
 bunu açıkça yazmıyor, `webhook-ping` ile gerçek bir teslimatta doğrulayın.
@@ -411,8 +469,7 @@ salt okunur araçlarla başlayın ve deneme uygulamasında ilerleyin.
 ## Bilinen eksikler
 
 - Custom Product Page, ürün sayfası optimizasyonu, in-app event ve retention yerleşimleri.
-- Screenshot için video önizleme (`APP_PREVIEW`) yüklemesi.
-- Dış test için Beta App Review gönderimi, kademeli yayın, finans raporları.
+- Finans raporları.
 - Keychain ile anahtar saklama; uzak veya sunucu tabanlı çok kullanıcılı erişim.
 
 ## Kaynaklar
