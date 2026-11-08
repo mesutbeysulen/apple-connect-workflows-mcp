@@ -1,6 +1,6 @@
 import { requireWrite, type Account } from './config.js';
 import { AppleError, type Resource } from './apple.js';
-import { submitForReview, type ReviewAPI, type ReviewResult } from './review.js';
+import { submitForReview, type ReviewAPI, type ReviewItem, type ReviewResult } from './review.js';
 import { EDITABLE_VERSION_STATES, validId, versionOfApp } from './apple-rules.js';
 
 export interface ReadinessAPI {
@@ -9,7 +9,8 @@ export interface ReadinessAPI {
 }
 export interface ReadinessReport {
   ready: boolean; appId: string; versionId: string; versionString: string; state: string;
-  blockers: string[]; warnings: string[]; notChecked: string[];
+  automatedReady: boolean; blockers: string[]; warnings: string[]; notChecked: string[];
+  manualChecks: { id: ManualCheckId; description: string; acknowledged: boolean }[];
 }
 const blank = (value: unknown) => value === undefined || value === null || (typeof value === 'string' && !value.trim());
 /** Returns undefined when Apple has no such related resource yet. */
@@ -17,14 +18,19 @@ async function optional(api: ReadinessAPI, path: string): Promise<Resource | und
   try { return (await api.get(path)) ?? undefined; }
   catch (error) { if (error instanceof AppleError && error.status === 404) return undefined; throw error; }
 }
-const NOT_CHECKABLE = [
-  'App Privacy labels: Apple offers no API for these; complete them in App Store Connect',
-  'Screenshot coverage for each required device size',
-  'App Review guideline compliance and final Apple validation',
-];
+export const MANUAL_CHECKS = {
+  'app-privacy': 'App Privacy data collection answers are accurate and published in App Store Connect.',
+  'screenshot-coverage': 'Screenshots cover every device class and locale required by Apple for this version.',
+  'account-compliance': 'Current agreements, DSA trader status, paid-app tax/banking, and applicable regional declarations are complete.',
+  'export-compliance': 'Any encryption documentation required for this build is approved and attached.',
+  'review-guidelines': 'The app was tested on supported devices; review notes, demo access and required evidence are complete.',
+} as const;
+export type ManualCheckId = keyof typeof MANUAL_CHECKS;
+export const manualCheckIds = Object.keys(MANUAL_CHECKS) as ManualCheckId[];
 /** Read-only pre-submission report. It lists what is locally verifiable; Apple's own validation still decides. */
-export async function releaseReadiness(api: ReadinessAPI, appId: string, versionId: string): Promise<ReadinessReport> {
+export async function releaseReadiness(api: ReadinessAPI, appId: string, versionId: string, acknowledged: ManualCheckId[] = []): Promise<ReadinessReport> {
   if (![appId, versionId].every(validId)) throw new Error('Invalid app or version ID.');
+  if (acknowledged.some(id => !manualCheckIds.includes(id))) throw new Error('Unknown manual check ID. Use the IDs in release_readiness.');
   const version = await versionOfApp(api, appId, versionId);
   const blockers: string[] = [];
   const warnings: string[] = [];
@@ -92,26 +98,75 @@ export async function releaseReadiness(api: ReadinessAPI, appId: string, version
   }
   if (!await optional(api, `/v1/apps/${appId}/appPriceSchedule`)) blockers.push('App price schedule is not set. Fix: app-price-set.');
   if (!await optional(api, `/v1/apps/${appId}/appAvailabilityV2`)) warnings.push('App availability is not set or could not be read. Fix: availability-set.');
-  return { ready: !blockers.length, appId, versionId, versionString, state, blockers, warnings, notChecked: NOT_CHECKABLE };
+  const manualChecks = manualCheckIds.map(id => ({ id, description: MANUAL_CHECKS[id], acknowledged: acknowledged.includes(id) }));
+  return { ready: !blockers.length && manualChecks.every(check => check.acknowledged), automatedReady: !blockers.length,
+    appId, versionId, versionString, state, blockers, warnings, manualChecks, notChecked: manualChecks.filter(check => !check.acknowledged).map(check => check.description) };
 }
 function confirmVersion(version: Resource, typed: string): void {
   if (version.attributes.versionString !== typed) throw new Error(`--version-string ${typed} does not match this version (${version.attributes.versionString}).`);
 }
+export interface ProductReviewVersions { iap?: string[]; subscription?: string[]; subscriptionGroup?: string[] }
+/** Traverse the app's product graph before making any review-draft write. */
+async function productReviewItems(api: ReadinessAPI, appId: string, versions: ProductReviewVersions = {}, inFlight = false): Promise<ReviewItem[]> {
+  const requested = {
+    inAppPurchaseVersion: new Set(versions.iap ?? []),
+    subscriptionVersion: new Set(versions.subscription ?? []),
+    subscriptionGroupVersion: new Set(versions.subscriptionGroup ?? []),
+  };
+  if (Object.values(requested).some(ids => [...ids].some(id => !validId(id)))) throw new Error('Invalid product review version ID.');
+  if (Object.values(requested).every(ids => !ids.size)) return [];
+  const found = new Set<string>();
+  async function scan(path: string, relation: keyof typeof requested): Promise<void> {
+    const rows = await api.list(`${path}?limit=200`, 2000);
+    if (rows.truncated) throw new Error(`Incomplete product version list at ${path}; refusing to submit.`);
+    for (const row of rows.data) if (requested[relation].has(row.id)) {
+      const state = String(row.attributes.state ?? 'UNKNOWN');
+      if (![...['PREPARE_FOR_SUBMISSION', 'READY_FOR_REVIEW'], ...(inFlight ? ['WAITING_FOR_REVIEW', 'IN_REVIEW'] : [])].includes(state)) throw new Error(`${relation} ${row.id} cannot be submitted in state ${state}.`);
+      found.add(`${relation}:${row.id}`);
+    }
+  }
+  if (requested.inAppPurchaseVersion.size) {
+    const products = await api.list(`/v1/apps/${appId}/inAppPurchasesV2?limit=200`, 2000);
+    if (products.truncated) throw new Error('Incomplete in-app purchase list; refusing to submit.');
+    for (const product of products.data) await scan(`/v2/inAppPurchases/${product.id}/versions`, 'inAppPurchaseVersion');
+  }
+  if (requested.subscriptionVersion.size || requested.subscriptionGroupVersion.size) {
+    const groups = await api.list(`/v1/apps/${appId}/subscriptionGroups?limit=200`, 2000);
+    if (groups.truncated) throw new Error('Incomplete subscription group list; refusing to submit.');
+    for (const group of groups.data) {
+      if (requested.subscriptionGroupVersion.size) await scan(`/v1/subscriptionGroups/${group.id}/versions`, 'subscriptionGroupVersion');
+      if (requested.subscriptionVersion.size) {
+        const products = await api.list(`/v1/subscriptionGroups/${group.id}/subscriptions?limit=200`, 2000);
+        if (products.truncated) throw new Error(`Incomplete subscriptions in group ${group.id}; refusing to submit.`);
+        for (const product of products.data) await scan(`/v1/subscriptions/${product.id}/versions`, 'subscriptionVersion');
+      }
+    }
+  }
+  const items: ReviewItem[] = [];
+  for (const [relation, ids] of Object.entries(requested) as [keyof typeof requested, Set<string>][]) for (const id of ids) {
+    if (!found.has(`${relation}:${id}`)) throw new Error(`${relation} ${id} does not belong to app ${appId} or is unavailable.`);
+    items.push({ relation, id });
+  }
+  return items;
+}
 /** Submits a version only when the readiness report has no blockers and the operator typed its version string. */
-export async function submitRelease(input: { account: Account; appId: string; versionId: string; versionString: string }, api: ReadinessAPI & ReviewAPI): Promise<ReviewResult & { warnings: string[] }> {
+export async function submitRelease(input: { account: Account; appId: string; versionId: string; versionString: string; manualChecks?: ManualCheckId[]; productVersions?: ProductReviewVersions }, api: ReadinessAPI & ReviewAPI): Promise<ReviewResult & { warnings: string[] }> {
   const { account, appId, versionId, versionString } = input;
   requireWrite(account, appId);
   if (!validId(versionId)) throw new Error('Invalid version ID.');
   const version = await versionOfApp(api, appId, versionId);
   confirmVersion(version, versionString);
   const platform = String(version.attributes.platform ?? 'IOS');
-  const items = [{ relation: 'appStoreVersion' as const, id: versionId }];
+  const inFlight = ['WAITING_FOR_REVIEW', 'IN_REVIEW'].includes(String(version.attributes.appVersionState ?? version.attributes.appStoreState));
+  const items: ReviewItem[] = [{ relation: 'appStoreVersion', id: versionId }, ...await productReviewItems(api, appId, input.productVersions, inFlight)];
+  if (platform === 'WATCH_OS' && items.length > 1) throw new Error('Apple Watch app versions cannot be submitted with in-app purchases or subscriptions.');
+  if (items.some(item => item.relation === 'subscriptionGroupVersion') && !items.some(item => item.relation === 'subscriptionVersion')) throw new Error('A new subscription group must be submitted with at least one subscription version.');
   // After a lost response the version is already with Apple; reconcile instead of re-checking an edit-only report.
-  if (['WAITING_FOR_REVIEW', 'IN_REVIEW'].includes(String(version.attributes.appVersionState ?? version.attributes.appStoreState))) {
+  if (inFlight) {
     return { ...await submitForReview({ account, appId, platform, items }, api), warnings: [] };
   }
-  const report = await releaseReadiness(api, appId, versionId);
-  if (!report.ready) throw new Error(`Release is not ready:\n- ${report.blockers.join('\n- ')}`);
+  const report = await releaseReadiness(api, appId, versionId, input.manualChecks);
+  if (!report.ready) throw new Error(`Release is not ready:\n- ${[...report.blockers, ...report.manualChecks.filter(check => !check.acknowledged).map(check => `Manual check ${check.id} is not acknowledged: ${check.description}`)].join('\n- ')}`);
   return { ...await submitForReview({ account, appId, platform, items }, api), warnings: report.warnings };
 }
 /** Releases an approved version that is waiting for the developer. This cannot be undone. */

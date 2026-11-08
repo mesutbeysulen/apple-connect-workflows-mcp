@@ -1,8 +1,20 @@
 # Apple Connect Workflows MCP
 
+[![npm version](https://img.shields.io/npm/v/apple-connect-workflows-mcp)](https://www.npmjs.com/package/apple-connect-workflows-mcp)
+[![CI](https://github.com/mesutbeysulen/apple-connect-workflows-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mesutbeysulen/apple-connect-workflows-mcp/actions/workflows/ci.yml)
+[![GitHub stars](https://img.shields.io/github/stars/mesutbeysulen/apple-connect-workflows-mcp)](https://github.com/mesutbeysulen/apple-connect-workflows-mcp/stargazers)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D24-brightgreen.svg)](https://nodejs.org/)
+
 A local [Model Context Protocol](https://modelcontextprotocol.io/) server for managing App Store Connect from an MCP client. It combines focused read tools with planned write workflows for app metadata, assets, builds, TestFlight, review, release, commerce, analytics, and webhooks.
 
-The server runs over stdio, keeps API keys on your machine, and stores plans and operation journals in a local SQLite database. It is not affiliated with Apple. The package is currently installed from source; it is not published to npm.
+The server runs over stdio, keeps API keys on your machine, and stores plans and operation journals in a local SQLite database. It is not affiliated with Apple.
+
+**Give this line to your AI assistant to install and configure the MCP server:**
+
+```text
+https://github.com/mesutbeysulen/apple-connect-workflows-mcp — install this MCP server for me and follow AGENTS.md. Keep the account read-only.
+```
 
 ## What it supports
 
@@ -26,13 +38,33 @@ Run `workflow_catalog` in your MCP client for the complete list of CLI workflows
 
 ## Install with an assistant
 
-If your assistant can access this private repository and run commands on your machine, give it this prompt:
+[AGENTS.md](AGENTS.md) guides the assistant through installing the server, configuring an API key by file path, checking connectivity, and registering the MCP client. It does not need the contents of your `.p8` key in chat.
 
-```text
-Install https://github.com/mesutbeysulen/apple-connect-workflows-mcp for my MCP client. Read AGENTS.md and complete the local setup. Keep the account read-only.
+## Install from npm
+
+Use the published version with Node.js 24 or newer:
+
+```sh
+npx -y apple-connect-workflows-mcp@0.2.0 --help
 ```
 
-[AGENTS.md](AGENTS.md) guides the assistant through building the server, configuring an API key by file path, checking connectivity, and registering the MCP client. It does not need the contents of your `.p8` key in chat. The repository must be accessible to the assistant. This route uses a local checkout; the package is not yet available through `npx`.
+For a team API key, create a local config file. The tool copies the key into a private local directory; pass only its file path:
+
+```sh
+npx -y apple-connect-workflows-mcp@0.2.0 key-setup \
+  --config "$HOME/.apple-connect-mcp/config.json" \
+  --name main --issuer YOUR_ISSUER_UUID \
+  --p8 /absolute/path/AuthKey_ABCDEFGHIJ.p8
+```
+
+For an individual key, replace `--issuer YOUR_ISSUER_UUID` with `--individual`. Register the MCP server with your client using `npx -y apple-connect-workflows-mcp@0.2.0 serve` and `APPLE_CONNECT_CONFIG` set to the config path. For Codex CLI:
+
+```sh
+codex mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
+  npx -y apple-connect-workflows-mcp@0.2.0 serve
+```
+
+Run `npx -y apple-connect-workflows-mcp@0.2.0 doctor --config "$HOME/.apple-connect-mcp/config.json"` to check the selected account. Accounts start read-only.
 
 ## Manual installation
 
@@ -43,7 +75,7 @@ npm ci
 npm run build
 ```
 
-The build creates `dist/cli.js`. The repository is configured as a private npm package (`"private": true`), so use the source checkout rather than `npx`.
+The build creates `dist/cli.js`. The source checkout is useful for development or when you prefer to pin a Git commit.
 
 ### Configure an API key
 
@@ -173,6 +205,10 @@ node dist/cli.js asset-upload --account main --app 1234567890 \
 ```
 
 Get `PLACEMENT_GROUP` from `asset_placements_list` or `asset_ref_data`; do not guess it. Upload and other write commands use the same account policy, app allowlist, lock, and audit journal as MCP execution. Price, availability, screenshot sync, metadata sync, and asset cleanup commands preview by default and write only with `--execute`.
+
+`release-check` reports automated blockers and five manual attestations. Its `ready` field remains false until the operator confirms App Privacy, screenshot coverage, account compliance, export compliance, and review readiness with `--manual-checks app-privacy,screenshot-coverage,account-compliance,export-compliance,review-guidelines`. Acknowledgment records the operator's check; it does not verify the App Store Connect website. `release-submit` requires these checks and the exact version string. Include `--iap-version-ids`, `--subscription-version-ids`, or `--subscription-group-version-ids` to send product metadata versions in the same review submission. The tool verifies that each product version belongs to the app before writing.
+
+For version-based product metadata, use `product-version-create` and `product-version-localize`; discover IDs through the `product_versions_list` and `product_version_localizations` MCP tools. The older `product-localize` command uses Apple's earlier product-level metadata model.
 
 ## Operational notes
 

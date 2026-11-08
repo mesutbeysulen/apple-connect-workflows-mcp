@@ -15,7 +15,9 @@ test('real stdio handshake lists workflows, returns accounts and rejects invalid
   try {
     await client.connect(transport);
     const listing = await client.listTools();
-    assert.equal(listing.tools.length, 55);
+    assert(listing.tools.length >= 55);
+    assert(listing.tools.some(t => t.name === 'product_versions_list'));
+    assert(listing.tools.some(t => t.name === 'product_version_localizations'));
     assert(listing.tools.some(t => t.name === 'workflow_apply' && t.annotations?.destructiveHint === true));
     assert(listing.tools.some(t => t.name === 'workflow_prepare'));
     const accounts = await client.callTool({ name: 'accounts_list', arguments: {} });

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
-import { createIap, createSubscription, createSubscriptionGroup, localizeProduct, setAppPrice, setIapPrice, setSubscriptionPrice } from '../src/commercial.js';
+import { createIap, createSubscription, createSubscriptionGroup, createProductVersion, localizeProduct, localizeProductVersion, setAppPrice, setIapPrice, setSubscriptionPrice } from '../src/commercial.js';
 import { downloadSales, downloadAnalytics, requestAnalytics, ReportSpool, reportPeriods } from '../src/reports.js';
 import { AppleError } from '../src/apple.js';
 import { account, readOnly, res, fakeApi } from './helpers.js';
@@ -44,6 +44,28 @@ test('localization creates, updates or leaves unchanged', async () => {
   assert.equal((await localizeProduct({ account, appId: '123', kind: 'subscription', productId: 'sub1', locale: 'en-US', name: 'Pro' }, f.api)).status, 'created');
   assert.equal(f.writes()[1]!.path, '/v1/subscriptionLocalizations');
   await assert.rejects(localizeProduct({ ...base, productId: 'stranger', name: 'x' }, f.api), /does not belong/);
+});
+test('product metadata versions are app-owned, idempotent and localized with v2 relationships', async () => {
+  const versions = shop({
+    '/v2/inAppPurchases/iap1/versions': [res('iv', 'inAppPurchaseVersions', { state: 'PREPARE_FOR_SUBMISSION' })],
+    '/v1/subscriptions/sub1/versions': [],
+    '/v1/subscriptionGroups/g1/versions': [res('gv', 'subscriptionGroupVersions', { state: 'PREPARE_FOR_SUBMISSION' })],
+    '/v1/inAppPurchaseVersions/iv/localizations': [res('loc', 'inAppPurchaseLocalizations', { locale: 'en-US', name: 'Coins' })],
+    '/v1/subscriptionGroupVersions/gv/localizations': [],
+  });
+  const f = fakeApi(versions);
+  const base = { account, appId: '123' };
+  assert.deepEqual(await createProductVersion({ ...base, kind: 'iap', productId: 'iap1' }, f.api), { status: 'exists', id: 'iv' });
+  assert.equal((await createProductVersion({ ...base, kind: 'subscription', productId: 'sub1' }, f.api)).status, 'created');
+  assert.equal((f.writes()[0]!.body as any).data.relationships.subscription.data.id, 'sub1');
+  assert.equal((await localizeProductVersion({ ...base, kind: 'iap', productId: 'iap1', versionId: 'iv', locale: 'en-US', name: 'Coins' }, f.api)).status, 'unchanged');
+  assert.equal((await localizeProductVersion({ ...base, kind: 'iap', productId: 'iap1', versionId: 'iv', locale: 'en-US', name: 'Gold' }, f.api)).status, 'updated');
+  assert.equal(f.writes()[1]!.path, '/v2/inAppPurchaseLocalizations/loc');
+  assert.equal((await localizeProductVersion({ ...base, kind: 'subscription-group', productId: 'g1', versionId: 'gv', locale: 'en-US', name: 'Pro' }, f.api)).status, 'created');
+  assert.equal((f.writes()[2]!.body as any).data.relationships.version.data.id, 'gv');
+  await assert.rejects(localizeProductVersion({ ...base, kind: 'iap', productId: 'iap1', versionId: 'foreign', locale: 'en-US', name: 'X' }, f.api), /does not belong/);
+  await assert.rejects(createProductVersion({ ...base, kind: 'iap', productId: 'foreign' }, f.api), /does not belong/);
+  assert.equal(f.writes().length, 3);
 });
 test('prices preview by default, match exactly and write only with execute', async () => {
   const f = fakeApi(shop());

@@ -6,7 +6,7 @@ import { PLACEMENT_GROUP_PATTERN } from './apple-rules.js';
 import { cleanupStaleAssets } from './asset-cleanup.js';
 import { buildStatus } from './build-status.js';
 import { creativeOverview } from './creative-assets.js';
-import { releaseReadiness } from './release.js';
+import { releaseReadiness, manualCheckIds } from './release.js';
 import { assertReadablePath, matchEndpoint, redactSecrets, searchCatalog } from './catalog.js';
 import { requestSchema } from './schema-check.js';
 import { createApiPlan } from './api-plans.js';
@@ -136,9 +136,9 @@ export function createServer(service: ConnectService, configPath?: string): McpS
     inputSchema: z.object({ account: z.string(), versionId: idSchema }).strict(), annotations: read,
   }, async ({ account, versionId }) => output(await creativeOverview(service.api(account), versionId)));
   server.registerTool('release_readiness', {
-    description: 'Read-only report of blockers and warnings before App Review submission, including what could not be checked. A clean report does not guarantee Apple accepts the submission.',
-    inputSchema: z.object({ account: z.string(), appId: idSchema, versionId: idSchema }).strict(), annotations: read,
-  }, async ({ account, appId, versionId }) => output(await releaseReadiness(service.api(account), appId, versionId)));
+    description: 'Read-only report of automated blockers and required manual checks. ready stays false until each manual check is explicitly acknowledged. This is an operator attestation, not independent verification.',
+    inputSchema: z.object({ account: z.string(), appId: idSchema, versionId: idSchema, manualChecks: z.array(z.enum(manualCheckIds)).default([]) }).strict(), annotations: read,
+  }, async ({ account, appId, versionId, manualChecks }) => output(await releaseReadiness(service.api(account), appId, versionId, manualChecks)));
   server.registerTool('review_submissions_list', {
     description: 'List App Review submissions for an app and their states.',
     inputSchema: z.object({ account: z.string(), appId: idSchema }).strict(), annotations: read,
@@ -146,7 +146,7 @@ export function createServer(service: ConnectService, configPath?: string): McpS
   server.registerTool('review_submission_items', {
     description: 'List the items of one App Review submission with their review states.',
     inputSchema: z.object({ account: z.string(), submissionId: idSchema }).strict(), annotations: read,
-  }, async ({ account, submissionId }) => output(await service.api(account).list(`/v1/reviewSubmissions/${submissionId}/items?include=appStoreVersion,appAssetLibraryImage,appAssetLibraryVideo&limit=200`, 2000)));
+  }, async ({ account, submissionId }) => output(await service.api(account).list(`/v1/reviewSubmissions/${submissionId}/items?include=appStoreVersion,appAssetLibraryImage,appAssetLibraryVideo,inAppPurchaseVersion,subscriptionVersion,subscriptionGroupVersion&limit=200`, 2000)));
   server.registerTool('iap_list', {
     description: 'List in-app purchases of an app.',
     inputSchema: z.object({ account: z.string(), appId: idSchema }).strict(), annotations: read,
@@ -159,6 +159,20 @@ export function createServer(service: ConnectService, configPath?: string): McpS
     description: 'List subscriptions in one subscription group.',
     inputSchema: z.object({ account: z.string(), groupId: idSchema }).strict(), annotations: read,
   }, async ({ account, groupId }) => output(await service.api(account).list(`/v1/subscriptionGroups/${groupId}/subscriptions?limit=200`, 2000)));
+  server.registerTool('product_versions_list', {
+    description: 'List metadata versions of an in-app purchase, subscription or subscription group. Use a PREPARE_FOR_SUBMISSION version for metadata edits and release-submit.',
+    inputSchema: z.object({ account: z.string(), kind: z.enum(['iap', 'subscription', 'subscription-group']), productId: idSchema }).strict(), annotations: read,
+  }, async ({ account, kind, productId }) => {
+    const prefix = kind === 'iap' ? '/v2/inAppPurchases' : kind === 'subscription' ? '/v1/subscriptions' : '/v1/subscriptionGroups';
+    return output(await service.api(account).list(`${prefix}/${productId}/versions?limit=200`, 2000));
+  });
+  server.registerTool('product_version_localizations', {
+    description: 'List localized metadata on a specific product version.',
+    inputSchema: z.object({ account: z.string(), kind: z.enum(['iap', 'subscription', 'subscription-group']), versionId: idSchema }).strict(), annotations: read,
+  }, async ({ account, kind, versionId }) => {
+    const prefix = kind === 'iap' ? 'inAppPurchaseVersions' : kind === 'subscription' ? 'subscriptionVersions' : 'subscriptionGroupVersions';
+    return output(await service.api(account).list(`/v1/${prefix}/${versionId}/localizations?limit=200`, 2000));
+  });
   server.registerTool('subscription_prices_list', {
     description: 'List scheduled and current prices of one subscription.',
     inputSchema: z.object({ account: z.string(), subscriptionId: idSchema }).strict(), annotations: read,

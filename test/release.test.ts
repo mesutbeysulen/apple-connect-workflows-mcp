@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { releaseReadiness, submitRelease, publishRelease } from '../src/release.js';
+import { releaseReadiness, submitRelease, publishRelease, manualCheckIds } from '../src/release.js';
 import { submitForReview } from '../src/review.js';
 import { account, readOnly, res, fakeApi } from './helpers.js';
 
@@ -20,10 +20,13 @@ const good = (over: Record<string, unknown> = {}) => ({
   '/v1/apps/123/appAvailabilityV2': res('av', 'appAvailabilities'),
   ...over,
 }) as never;
-test('a complete version is ready and still lists what could not be checked', async () => {
+test('automated checks alone cannot certify a release; explicit manual checks can', async () => {
   const report = await releaseReadiness(fakeApi(good()).api, '123', 'v');
-  assert.deepEqual(report.blockers, []); assert.equal(report.ready, true);
+  assert.deepEqual(report.blockers, []); assert.equal(report.automatedReady, true); assert.equal(report.ready, false);
   assert(report.notChecked.some(n => /Privacy/.test(n)));
+  const attested = await releaseReadiness(fakeApi(good()).api, '123', 'v', manualCheckIds);
+  assert.equal(attested.ready, true); assert.deepEqual(attested.notChecked, []);
+  await assert.rejects(releaseReadiness(fakeApi(good()).api, '123', 'v', ['invented' as never]), /Unknown manual check/);
 });
 test('reports every missing field as a blocker', async () => {
   const f = fakeApi(good({
@@ -50,7 +53,7 @@ test('build problems block; first release does not need notes; legacy screenshot
     '/v1/appStoreVersions/v/appStoreVersionLocalizations': [res('loc', 'x', { locale: 'tr', description: 'd', keywords: 'k', supportUrl: 'https://x' })],
     '/v1/appStoreVersionLocalizations/loc/placements': [],
     '/v1/appStoreVersionLocalizations/loc/appScreenshotSets': [res('set', 'appScreenshotSets')], '/v1/appScreenshotSets/set/appScreenshots': [res('s', 'appScreenshots', { assetDeliveryState: { state: 'COMPLETE' } })] })).api, '123', 'v');
-  assert.deepEqual(first.blockers, []);
+  assert.deepEqual(first.blockers, []); assert.equal(first.automatedReady, true);
   await assert.rejects(releaseReadiness(fakeApi(good({ '/v1/appStoreVersions/v': res('v', 'appStoreVersions', {}, { app: { data: { id: '999', type: 'apps' } } }) })).api, '123', 'v'), /does not belong/);
 });
 test('failed placements and abandoned reservations are not screenshots; incomplete lists block', async () => {
@@ -67,17 +70,53 @@ test('failed placements and abandoned reservations are not screenshots; incomple
 });
 const withSubmission = (extra = {}) => good({ '/v1/reviewSubmissions/new-id': res('new-id', 'reviewSubmissions', { state: 'WAITING_FOR_REVIEW' }), ...extra });
 test('submit requires a clean report, the typed version string and write access', async () => {
+  const input = { account, appId: '123', versionId: 'v', versionString: '1.2.0', manualChecks: manualCheckIds };
   const ok = fakeApi(withSubmission());
-  const result = await submitRelease({ account, appId: '123', versionId: 'v', versionString: '1.2.0' }, ok.api);
+  const result = await submitRelease(input, ok.api);
   assert.equal(result.status, 'submitted');
   assert.equal((ok.writes()[1]!.body as any).data.relationships.appStoreVersion.data.id, 'v');
+  const unacknowledged = fakeApi(withSubmission());
+  await assert.rejects(submitRelease({ ...input, manualChecks: [] }, unacknowledged.api), /Manual check app-privacy is not acknowledged/);
+  assert.equal(unacknowledged.writes().length, 0);
   const wrong = fakeApi(withSubmission());
-  await assert.rejects(submitRelease({ account, appId: '123', versionId: 'v', versionString: '9.9' }, wrong.api), /does not match/);
+  await assert.rejects(submitRelease({ ...input, versionString: '9.9' }, wrong.api), /does not match/);
   const blocked = fakeApi(withSubmission({ '/v1/apps/123/appPriceSchedule': undefined }));
-  await assert.rejects(submitRelease({ account, appId: '123', versionId: 'v', versionString: '1.2.0' }, blocked.api), /not ready[\s\S]*price schedule/);
+  await assert.rejects(submitRelease(input, blocked.api), /not ready[\s\S]*price schedule/);
   const locked = fakeApi(withSubmission());
-  await assert.rejects(submitRelease({ account: readOnly, appId: '123', versionId: 'v', versionString: '1.2.0' }, locked.api), /read-only/);
+  await assert.rejects(submitRelease({ ...input, account: readOnly }, locked.api), /read-only/);
   assert.equal(wrong.writes().length + blocked.writes().length + locked.writes().length, 0);
+});
+test('release submits only requested product versions that belong to the app', async () => {
+  const products = {
+    '/v1/apps/123/inAppPurchasesV2': [res('iap', 'inAppPurchases')],
+    '/v2/inAppPurchases/iap/versions': [res('iap-v', 'inAppPurchaseVersions', { state: 'PREPARE_FOR_SUBMISSION' })],
+    '/v1/apps/123/subscriptionGroups': [res('group', 'subscriptionGroups')],
+    '/v1/subscriptionGroups/group/versions': [res('group-v', 'subscriptionGroupVersions', { state: 'PREPARE_FOR_SUBMISSION' })],
+    '/v1/subscriptionGroups/group/subscriptions': [res('sub', 'subscriptions')],
+    '/v1/subscriptions/sub/versions': [res('sub-v', 'subscriptionVersions', { state: 'PREPARE_FOR_SUBMISSION' })],
+  };
+  const input = { account, appId: '123', versionId: 'v', versionString: '1.2.0', manualChecks: manualCheckIds,
+    productVersions: { iap: ['iap-v'], subscription: ['sub-v'], subscriptionGroup: ['group-v'] } };
+  const f = fakeApi(withSubmission(products));
+  await submitRelease(input, f.api);
+  const items = f.writes().filter(w => w.path === '/v1/reviewSubmissionItems').map(w => (w.body as any).data.relationships);
+  assert.deepEqual(items.map(r => Object.keys(r).find(k => k !== 'reviewSubmission')), ['appStoreVersion', 'inAppPurchaseVersion', 'subscriptionVersion', 'subscriptionGroupVersion']);
+  assert.equal(items[1]!.inAppPurchaseVersion.data.type, 'inAppPurchaseVersions');
+  assert.equal(items[2]!.subscriptionVersion.data.type, 'subscriptionVersions');
+  const foreign = fakeApi(withSubmission(products));
+  await assert.rejects(submitRelease({ ...input, productVersions: { iap: ['other'] } }, foreign.api), /does not belong/);
+  assert.equal(foreign.writes().length, 0);
+  const wrongState = fakeApi(withSubmission({ ...products, '/v2/inAppPurchases/iap/versions': [res('iap-v', 'inAppPurchaseVersions', { state: 'APPROVED' })] }));
+  await assert.rejects(submitRelease({ ...input, productVersions: { iap: ['iap-v'] } }, wrongState.api), /cannot be submitted/);
+  assert.equal(wrongState.writes().length, 0);
+  const groupOnly = fakeApi(withSubmission(products));
+  await assert.rejects(submitRelease({ ...input, productVersions: { subscriptionGroup: ['group-v'] } }, groupOnly.api), /at least one subscription version/);
+  assert.equal(groupOnly.writes().length, 0);
+});
+test('review submission refuses more than Apple\'s 200 item limit before any write', async () => {
+  const f = fakeApi(withSubmission());
+  await assert.rejects(submitForReview({ account, appId: '123', items: Array.from({ length: 201 }, (_, i) => ({ relation: 'inAppPurchaseVersion', id: `product-${i}` })) }, f.api), /at most 200/);
+  assert.equal(f.writes().length, 0);
 });
 const linked = (relation: string, id: string, state = 'READY_FOR_REVIEW') => res(`item-${id}`, 'reviewSubmissionItems', { state }, { [relation]: { data: { id, type: 'x' } } });
 test('review reuses its own draft, refuses drafts holding other work, and detects a sent submission', async () => {

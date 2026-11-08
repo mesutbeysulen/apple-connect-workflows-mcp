@@ -14,8 +14,8 @@ import { uploadAsset, resumeAsset, orderPlacements, IMAGE_PLACEMENT_TYPES, type 
 import { createScreenshotSet, orderScreenshots } from './screenshot-sets.js';
 import { cleanupStaleAssets } from './asset-cleanup.js';
 import { uploadCreative, resumeCreative, submitCreatives, placeCreative, removeCreativePlacement, parseTargets, type CreativeKind } from './creative-assets.js';
-import { releaseReadiness, submitRelease, publishRelease } from './release.js';
-import { createIap, createSubscription, createSubscriptionGroup, localizeProduct, setAppPrice, setIapPrice, setSubscriptionPrice } from './commercial.js';
+import { releaseReadiness, submitRelease, publishRelease, manualCheckIds, type ManualCheckId } from './release.js';
+import { createIap, createSubscription, createSubscriptionGroup, createProductVersion, localizeProduct, localizeProductVersion, setAppPrice, setIapPrice, setSubscriptionPrice, type ProductKind } from './commercial.js';
 import { downloadSales, requestAnalytics, downloadAnalytics } from './reports.js';
 import { createWebhook, deleteWebhook, pingWebhook, redeliverWebhook, setWebhookEnabled, webhookReceiver, webhookSecret } from './webhooks.js';
 import { setupKey } from './key-setup.js';
@@ -86,8 +86,9 @@ const HELP = `apple-connect-mcp <command> [--config /absolute/config.json]
   creative-remove --account NAME --app ID --version ID --localization ID --placement ID
 
  Release
-  release-check --account NAME --app ID --version ID
-  release-submit --account NAME --app ID --version ID --version-string 1.2.3
+  release-check --account NAME --app ID --version ID [--manual-checks ID1,ID2,...]
+  release-submit --account NAME --app ID --version ID --version-string 1.2.3 --manual-checks ID1,ID2,...
+                 [--iap-version-ids ID1,ID2,...] [--subscription-version-ids ID1,ID2,...] [--subscription-group-version-ids ID1,ID2,...]
   release-publish --account NAME --app ID --version ID --version-string 1.2.3
 
  Commercial (price commands preview unless --execute is given)
@@ -95,6 +96,8 @@ const HELP = `apple-connect-mcp <command> [--config /absolute/config.json]
   subscription-group-create --account NAME --app ID --name TEXT
   subscription-create --account NAME --app ID --group ID --product-id ID --name TEXT --period ONE_MONTH [--group-level 1]
   product-localize --account NAME --app ID (--iap ID | --subscription ID) --locale tr --name TEXT [--description TEXT]
+  product-version-create --account NAME --app ID --kind iap|subscription|subscription-group --product ID
+  product-version-localize --account NAME --app ID --kind iap|subscription|subscription-group --product ID --version ID --locale en-US --name TEXT [--description TEXT] [--custom-app-name TEXT]
   app-price-set --account NAME --app ID --territory USA --price 4.99 [--start-date YYYY-MM-DD] [--execute]
   iap-price-set --account NAME --app ID --iap ID --territory USA --price 4.99 [--start-date YYYY-MM-DD] [--execute]
   subscription-price-set --account NAME --app ID --subscription ID --territory USA --price 4.99
@@ -144,11 +147,12 @@ const options = {
   'first-name': { type: 'string' }, 'last-name': { type: 'string' }, phone: { type: 'string' }, email: { type: 'string' }, notes: { type: 'string' }, 'demo-required': { type: 'string' }, 'demo-name': { type: 'string' },
   submission: { type: 'string' }, item: { type: 'string' }, state: { type: 'string' }, 'feedback-email': { type: 'string' }, 'public-link': { type: 'boolean' }, feedback: { type: 'boolean' }, emails: { type: 'string' }, tester: { type: 'string' }, review: { type: 'string' }, text: { type: 'string' }, identifier: { type: 'string' }, individual: { type: 'boolean' },
   placements: { type: 'string' }, 'preview-frame': { type: 'string' }, asset: { type: 'string' }, images: { type: 'string' }, videos: { type: 'string' }, video: { type: 'string' }, replace: { type: 'boolean' }, placement: { type: 'string' },
-  'version-string': { type: 'string' }, 'product-id': { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, period: { type: 'string' }, 'group-level': { type: 'string' }, iap: { type: 'string' }, subscription: { type: 'string' }, locale: { type: 'string' }, description: { type: 'string' },
+  'version-string': { type: 'string' }, 'product-id': { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, period: { type: 'string' }, 'group-level': { type: 'string' }, iap: { type: 'string' }, subscription: { type: 'string' }, locale: { type: 'string' }, description: { type: 'string' }, kind: { type: 'string' }, product: { type: 'string' }, 'custom-app-name': { type: 'string' },
   territory: { type: 'string' }, price: { type: 'string' }, 'start-date': { type: 'string' }, 'preserve-current-price': { type: 'boolean' },
   vendor: { type: 'string' }, subtype: { type: 'string' }, frequency: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, out: { type: 'string' }, 'report-version': { type: 'string' }, access: { type: 'string' }, 'report-name': { type: 'string' }, granularity: { type: 'string' }, category: { type: 'string' },
   issuer: { type: 'string' }, p8: { type: 'string' }, 'key-id': { type: 'string' }, 'allow-app': { type: 'string' }, url: { type: 'string' }, events: { type: 'string' }, webhook: { type: 'string' }, delivery: { type: 'string' }, port: { type: 'string' }, limit: { type: 'string' },
-  'display-type': { type: 'string' }, upload: { type: 'string' }, 'timeout-minutes': { type: 'string' }, 'interval-seconds': { type: 'string' }, 'older-than-hours': { type: 'string' }, execute: { type: 'boolean' }, help: { type: 'boolean' },
+  'display-type': { type: 'string' }, upload: { type: 'string' }, 'timeout-minutes': { type: 'string' }, 'interval-seconds': { type: 'string' }, 'older-than-hours': { type: 'string' }, 'manual-checks': { type: 'string' },
+  'iap-version-ids': { type: 'string' }, 'subscription-version-ids': { type: 'string' }, 'subscription-group-version-ids': { type: 'string' }, execute: { type: 'boolean' }, help: { type: 'boolean' },
 } as const;
 type Values = ReturnType<typeof parseArgs<{ options: typeof options; allowPositionals: true }>>['values'];
 
@@ -289,14 +293,17 @@ const commands: Record<string, Handler> = {
   },
   'release-check': async (v, { account }) => {
     const a = required(v, 'app', 'version');
-    const report = await releaseReadiness(screenshotClient(account()), a.app, a.version);
-    if (!report.ready) process.exitCode = 1;
-    return report;
+    const checks = ids(v['manual-checks'] ?? '') as ManualCheckId[];
+    if (checks.some(id => !manualCheckIds.includes(id))) throw new Error(`--manual-checks must contain: ${manualCheckIds.join(',')}`);
+    return releaseReadiness(screenshotClient(account()), a.app, a.version, checks);
   },
   'release-submit': async (v, { account }) => {
     const a = required(v, 'app', 'version', 'version-string');
     const acc = account();
-    return submitRelease({ account: acc, appId: a.app, versionId: a.version, versionString: a['version-string'] }, screenshotClient(acc));
+    const checks = ids(v['manual-checks'] ?? '') as ManualCheckId[];
+    if (checks.some(id => !manualCheckIds.includes(id))) throw new Error(`--manual-checks must contain: ${manualCheckIds.join(',')}`);
+    return submitRelease({ account: acc, appId: a.app, versionId: a.version, versionString: a['version-string'], manualChecks: checks,
+      productVersions: { iap: ids(v['iap-version-ids'] ?? ''), subscription: ids(v['subscription-version-ids'] ?? ''), subscriptionGroup: ids(v['subscription-group-version-ids'] ?? '') } }, screenshotClient(acc));
   },
   'release-publish': async (v, { account }) => {
     const a = required(v, 'app', 'version', 'version-string');
@@ -323,6 +330,19 @@ const commands: Record<string, Handler> = {
     if (!!v.iap === !!v.subscription) throw new Error('Pass exactly one of --iap or --subscription.');
     const acc = account();
     return localizeProduct({ account: acc, appId: a.app, kind: v.iap ? 'iap' : 'subscription', productId: (v.iap ?? v.subscription)!, locale: a.locale, name: a.name, description: v.description }, screenshotClient(acc));
+  },
+  'product-version-create': async (v, { account }) => {
+    const a = required(v, 'app', 'kind', 'product');
+    if (!['iap', 'subscription', 'subscription-group'].includes(a.kind)) throw new Error('--kind must be iap, subscription or subscription-group.');
+    const acc = account();
+    return createProductVersion({ account: acc, appId: a.app, kind: a.kind as ProductKind, productId: a.product }, screenshotClient(acc));
+  },
+  'product-version-localize': async (v, { account }) => {
+    const a = required(v, 'app', 'kind', 'product', 'version', 'locale', 'name');
+    if (!['iap', 'subscription', 'subscription-group'].includes(a.kind)) throw new Error('--kind must be iap, subscription or subscription-group.');
+    const acc = account();
+    return localizeProductVersion({ account: acc, appId: a.app, kind: a.kind as ProductKind, productId: a.product, versionId: a.version, locale: a.locale,
+      name: a.name, description: v.description, customAppName: v['custom-app-name'] }, screenshotClient(acc));
   },
   'app-price-set': async (v, { account }) => {
     const a = required(v, 'app', 'territory', 'price');
@@ -385,6 +405,7 @@ const WRITES: Record<string, Capability> = {
   'creative-upload': 'upload', 'creative-resume': 'upload', 'creative-place': 'upload', 'creative-remove': 'upload',
   'creative-submit': 'review', 'release-submit': 'review', 'release-publish': 'release',
   'iap-create': 'commercial', 'subscription-group-create': 'commercial', 'subscription-create': 'commercial', 'product-localize': 'commercial',
+  'product-version-create': 'commercial', 'product-version-localize': 'commercial',
   'app-price-set': 'commercial', 'iap-price-set': 'commercial', 'subscription-price-set': 'commercial',
   'analytics-request': 'admin', 'webhook-create': 'admin', 'webhook-enable': 'admin', 'webhook-disable': 'admin', 'webhook-ping': 'admin', 'webhook-delete': 'admin', 'webhook-redeliver': 'admin',
 };

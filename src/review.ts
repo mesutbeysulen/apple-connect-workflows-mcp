@@ -8,8 +8,9 @@ export interface ReviewAPI {
   post(path: string, body: unknown): Promise<Resource>;
   patch(path: string, type: string, id: string, attributes: Record<string, unknown>): Promise<unknown>;
 }
-export type ReviewRelation = 'appStoreVersion' | 'appAssetLibraryImage' | 'appAssetLibraryVideo';
-const TYPES: Record<ReviewRelation, string> = { appStoreVersion: 'appStoreVersions', appAssetLibraryImage: 'appAssetLibraryImages', appAssetLibraryVideo: 'appAssetLibraryVideos' };
+export type ReviewRelation = 'appStoreVersion' | 'appAssetLibraryImage' | 'appAssetLibraryVideo' | 'inAppPurchaseVersion' | 'subscriptionVersion' | 'subscriptionGroupVersion';
+const TYPES: Record<ReviewRelation, string> = { appStoreVersion: 'appStoreVersions', appAssetLibraryImage: 'appAssetLibraryImages', appAssetLibraryVideo: 'appAssetLibraryVideos',
+  inAppPurchaseVersion: 'inAppPurchaseVersions', subscriptionVersion: 'subscriptionVersions', subscriptionGroupVersion: 'subscriptionGroupVersions' };
 export interface ReviewItem { relation: ReviewRelation; id: string }
 export interface ReviewResult { status: 'submitted' | 'resubmitted' | 'already_submitted'; submissionId: string; state: string; addedItems: string[] }
 const key = (relation: string, id: string) => `${relation}:${id}`;
@@ -49,6 +50,7 @@ export async function submitForReview(input: { account: Account; appId: string; 
   const platform = input.platform ?? 'IOS';
   requireWrite(account, appId);
   if (!items.length || !items.every(i => validId(i.id))) throw new Error('Provide at least one valid item to submit.');
+  if (items.length > 200) throw new Error('Apple allows at most 200 items in one review submission.');
   const wanted = items.map(i => key(i.relation, i.id));
   for (const active of await submissions(api, appId, platform, IN_FLIGHT)) {
     const { keys } = await itemKeys(api, active.id);

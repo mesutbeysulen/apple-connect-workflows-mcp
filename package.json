@@ -1,7 +1,9 @@
 {
   "name": "apple-connect-workflows-mcp",
-  "version": "0.1.2",
-  "private": true,
+  "version": "0.2.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "description": "Local App Store Connect MCP for release, TestFlight, assets, commerce, analytics and workflow plans",
   "keywords": [

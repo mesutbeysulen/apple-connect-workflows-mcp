@@ -14,6 +14,12 @@ const rel = (type: string, id: string) => ({ data: { type, id } });
 export const IAP_TYPES = ['CONSUMABLE', 'NON_CONSUMABLE', 'NON_RENEWING_SUBSCRIPTION'];
 export const SUBSCRIPTION_PERIODS = ['ONE_WEEK', 'ONE_MONTH', 'TWO_MONTHS', 'THREE_MONTHS', 'SIX_MONTHS', 'ONE_YEAR'];
 export interface Created { status: 'exists' | 'created'; id: string }
+export type ProductKind = 'iap' | 'subscription' | 'subscription-group';
+const PRODUCT_VERSION = {
+  iap: { parent: 'inAppPurchases', path: '/v2/inAppPurchases', version: 'inAppPurchaseVersions', relation: 'inAppPurchase', localization: 'inAppPurchaseLocalizations' },
+  subscription: { parent: 'subscriptions', path: '/v1/subscriptions', version: 'subscriptionVersions', relation: 'subscription', localization: 'subscriptionLocalizations' },
+  'subscription-group': { parent: 'subscriptionGroups', path: '/v1/subscriptionGroups', version: 'subscriptionGroupVersions', relation: 'subscriptionGroup', localization: 'subscriptionGroupLocalizations' },
+} as const;
 
 async function appIaps(api: CommercialAPI, appId: string): Promise<Resource[]> {
   const rows = await api.list(`/v1/apps/${appId}/inAppPurchasesV2?limit=200`, 2000);
@@ -22,12 +28,61 @@ async function appIaps(api: CommercialAPI, appId: string): Promise<Resource[]> {
 }
 async function appSubscription(api: CommercialAPI, appId: string, subscriptionId: string): Promise<Resource> {
   const groups = await api.list(`/v1/apps/${appId}/subscriptionGroups?limit=200`, 2000);
+  if (groups.truncated) throw new Error('Incomplete subscription group list.');
   for (const group of groups.data) {
     const subs = await api.list(`/v1/subscriptionGroups/${group.id}/subscriptions?limit=200`, 2000);
+    if (subs.truncated) throw new Error('Incomplete subscription list.');
     const match = subs.data.find(row => row.id === subscriptionId);
     if (match) return match;
   }
   throw new Error('Subscription does not belong to this app.');
+}
+async function ownedProduct(api: CommercialAPI, appId: string, kind: ProductKind, productId: string): Promise<void> {
+  if (!validId(productId)) throw new Error('Invalid product ID.');
+  if (kind === 'subscription') { await appSubscription(api, appId, productId); return; }
+  const path = kind === 'iap' ? `/v1/apps/${appId}/inAppPurchasesV2?limit=200` : `/v1/apps/${appId}/subscriptionGroups?limit=200`;
+  const rows = await api.list(path, 2000);
+  if (rows.truncated) throw new Error('Incomplete product list.');
+  if (!rows.data.some(row => row.id === productId)) throw new Error(`${kind} ${productId} does not belong to app ${appId}.`);
+}
+/** Creates a draft metadata version. Apple freezes version contents after submission. */
+export async function createProductVersion(input: { account: Account; appId: string; kind: ProductKind; productId: string }, api: CommercialAPI): Promise<Created> {
+  const { account, appId, kind, productId } = input;
+  requireWrite(account, appId);
+  const spec = PRODUCT_VERSION[kind];
+  if (!spec) throw new Error('Invalid product kind.');
+  await ownedProduct(api, appId, kind, productId);
+  const versions = await api.list(`${spec.path}/${productId}/versions?limit=200`, 2000);
+  if (versions.truncated) throw new Error('Incomplete product version list.');
+  const draft = versions.data.find(row => row.attributes.state === 'PREPARE_FOR_SUBMISSION');
+  if (draft) return { status: 'exists', id: draft.id };
+  const created = await api.post(`/v1/${spec.version}`, { data: { type: spec.version, relationships: { [spec.relation]: rel(spec.parent, productId) } } });
+  return { status: 'created', id: created.id };
+}
+/** Localizes a draft product version using Apple's version-based v2 metadata API. */
+export async function localizeProductVersion(input: { account: Account; appId: string; kind: ProductKind; productId: string; versionId: string; locale: string; name: string; description?: string; customAppName?: string }, api: CommercialAPI): Promise<Created | { status: 'updated' | 'unchanged'; id: string }> {
+  const { account, appId, kind, productId, versionId, locale, name, description, customAppName } = input;
+  requireWrite(account, appId);
+  const spec = PRODUCT_VERSION[kind];
+  if (!spec || !validId(versionId) || !/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(locale) || !validName(name)) throw new Error('Use valid kind, version ID, locale and name.');
+  if (kind === 'subscription-group' ? description !== undefined : customAppName !== undefined) throw new Error('This field does not apply to the selected product kind.');
+  await ownedProduct(api, appId, kind, productId);
+  const versions = await api.list(`${spec.path}/${productId}/versions?limit=200`, 2000);
+  if (versions.truncated) throw new Error('Incomplete product version list.');
+  const version = versions.data.find(row => row.id === versionId);
+  if (!version) throw new Error(`Version ${versionId} does not belong to ${kind} ${productId}.`);
+  if (version.attributes.state !== 'PREPARE_FOR_SUBMISSION') throw new Error(`Version ${versionId} is not editable (${version.attributes.state}).`);
+  const localizations = await api.list(`/v1/${spec.version}/${versionId}/localizations?limit=200`, 2000);
+  if (localizations.truncated) throw new Error('Incomplete product localization list.');
+  const found = localizations.data.find(row => row.attributes.locale === locale);
+  const attributes = { name, ...(description === undefined ? {} : { description }), ...(customAppName === undefined ? {} : { customAppName }) };
+  if (found) {
+    if (Object.entries(attributes).every(([field, value]) => found.attributes[field] === value)) return { status: 'unchanged', id: found.id };
+    await api.patch(`/v2/${spec.localization}/${found.id}`, spec.localization, found.id, attributes);
+    return { status: 'updated', id: found.id };
+  }
+  const created = await api.post(`/v2/${spec.localization}`, { data: { type: spec.localization, attributes: { ...attributes, locale }, relationships: { version: rel(spec.version, versionId) } } });
+  return { status: 'created', id: created.id };
 }
 export async function createIap(input: { account: Account; appId: string; productId: string; name: string; type: string; familySharable?: boolean }, api: CommercialAPI): Promise<Created> {
   const { account, appId, productId, name, type, familySharable } = input;
