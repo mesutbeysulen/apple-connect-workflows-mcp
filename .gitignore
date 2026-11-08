@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env*
+*.p8
+*.sqlite*
+config.local.json
+.DS_Store
