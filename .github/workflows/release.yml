@@ -41,13 +41,21 @@ jobs:
         run: npm run check
       - if: steps.version.outputs.publish == 'true'
         run: npm test
-      # Trusted publishing (OIDC) needs npm 11.5.1 or later. An NPM_TOKEN secret is used only if one is set.
+      # Trusted publishing (OIDC) needs npm 11.5.1 or later.
       - if: steps.version.outputs.publish == 'true'
         run: npm install -g npm@11.6.2
+      # With an NPM_TOKEN secret, OIDC is switched off so npm cannot prefer a trusted-publisher
+      # identity the package does not accept; provenance needs OIDC, so it is skipped then.
+      # Without the secret, npm publishes through trusted publishing with provenance.
       - if: steps.version.outputs.publish == 'true'
-        run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NODE_AUTH_TOKEN" ]; then
+            ACTIONS_ID_TOKEN_REQUEST_URL= ACTIONS_ID_TOKEN_REQUEST_TOKEN= npm publish --access public
+          else
+            npm publish --provenance --access public
+          fi
       - name: Tag and create the GitHub release
         if: steps.version.outputs.publish == 'true'
         env:

@@ -238,7 +238,7 @@ CI runs the checks on Node.js 24 and 26. To regenerate the API catalog from an A
 
 Bump `version` in `package.json` and push to `main`. The Release workflow runs only when npm does not have that version yet: it runs the checks and tests, publishes to npm with provenance, then creates the `v<version>` tag and a GitHub release. Other pushes skip it.
 
-Publishing uses npm trusted publishing. On npmjs.com, add a trusted publisher for this package with GitHub Actions, this repository and the workflow file `release.yml`. An `NPM_TOKEN` repository secret also works if you prefer a token.
+Publishing uses npm trusted publishing with provenance. On npmjs.com, add a trusted publisher for this package with GitHub Actions, this repository and the workflow file `release.yml`. If an `NPM_TOKEN` repository secret exists, the workflow publishes with that token instead and skips provenance; remove the secret to return to trusted publishing.
 
 ## License
 
