@@ -26,7 +26,7 @@ async function appIaps(api: CommercialAPI, appId: string): Promise<Resource[]> {
   if (rows.truncated) throw new Error('Incomplete in-app purchase list; refusing to continue.');
   return rows.data;
 }
-async function appSubscription(api: CommercialAPI, appId: string, subscriptionId: string): Promise<Resource> {
+export async function appSubscription(api: CommercialAPI, appId: string, subscriptionId: string): Promise<Resource> {
   const groups = await api.list(`/v1/apps/${appId}/subscriptionGroups?limit=200`, 2000);
   if (groups.truncated) throw new Error('Incomplete subscription group list.');
   for (const group of groups.data) {
@@ -159,7 +159,7 @@ async function currentSchedule(api: CommercialAPI, schedulePath: string, resourc
   return { current: rows.data.map(row => toPrice(row, pointRelation)), currentIncomplete: rows.truncated };
 }
 /** Matches a decimal price exactly; Apple only sells fixed price points, so nothing is rounded silently. */
-async function pricePoint(api: CommercialAPI, path: string, territory: string, price: string): Promise<string> {
+export async function pricePoint(api: CommercialAPI, path: string, territory: string, price: string): Promise<string> {
   if (!/^[A-Z]{3}$/.test(territory) || !/^\d+(\.\d{1,4})?$/.test(price)) throw new Error('Use a three-letter territory such as USA and a decimal price such as 4.99.');
   const query = new URLSearchParams({ 'filter[territory]': territory, limit: '200' });
   const points = await api.list(`${path}?${query}`, 2000);

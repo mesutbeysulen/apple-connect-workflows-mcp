@@ -1,4 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/server';
+
+/** Reported to MCP clients; read from package.json so it cannot drift from the published version. */
+const PACKAGE_VERSION = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
 import { z } from 'zod';
 import { ConnectService, idSchema, prepareSchema } from './service.js';
 import { assetLibraryId } from './asset-library.js';
@@ -18,7 +22,7 @@ const PLACEMENT_TYPES = ['APP_SCREENSHOT', 'IMESSAGE_APP_SCREENSHOT', 'APP_PREVI
 const groupSchema = z.string().regex(PLACEMENT_GROUP_PATTERN);
 
 export function createServer(service: ConnectService, configPath?: string): McpServer {
-  const server = new McpServer({ name: 'apple-connect-workflows', version: '0.1.0' });
+  const server = new McpServer({ name: 'apple-connect-workflows', version: PACKAGE_VERSION });
   registerWorkflowTools(server, service, configPath);
   const output = (raw: unknown) => { const value = redactSecrets(raw); return { content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }], structuredContent: { result: value } }; };
   const read = { readOnlyHint: true, destructiveHint: false, openWorldHint: true };
@@ -197,6 +201,14 @@ export function createServer(service: ConnectService, configPath?: string): McpS
   }, async ({ account, kind, versionId }) => {
     const prefix = kind === 'iap' ? 'inAppPurchaseVersions' : 'subscriptionVersions';
     return output(await service.api(account).list(`/v1/${prefix}/${versionId}/images?limit=200`, 2000));
+  });
+  server.registerTool('introductory_offers_list', {
+    description: 'List introductory offers (free trials and discounted starts) of one subscription, optionally for one territory.',
+    inputSchema: z.object({ account: z.string(), subscriptionId: idSchema, territory: z.string().regex(/^[A-Z]{3}$/).optional() }).strict(), annotations: read,
+  }, async ({ account, subscriptionId, territory }) => {
+    const query = new URLSearchParams({ include: 'subscriptionPricePoint,territory', limit: '200' });
+    if (territory) query.set('filter[territory]', territory);
+    return output(await service.api(account).list(`/v1/subscriptions/${subscriptionId}/introductoryOffers?${query}`, 2000));
   });
   server.registerTool('subscription_prices_list', {
     description: 'List scheduled and current prices of one subscription.',

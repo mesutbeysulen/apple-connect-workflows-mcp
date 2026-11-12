@@ -18,7 +18,8 @@ import { uploadCreative, resumeCreative, submitCreatives, placeCreative, removeC
 import { releaseReadiness, submitRelease, publishRelease, manualCheckIds, type ManualCheckId } from './release.js';
 import { createIap, createSubscription, createSubscriptionGroup, createProductVersion, localizeProduct, localizeProductVersion, setAppPrice, setIapPrice, setSubscriptionPrice, type ProductKind } from './commercial.js';
 import { uploadProductVersionImage } from './product-images.js';
-import { downloadSales, requestAnalytics, downloadAnalytics } from './reports.js';
+import { downloadSales, downloadFinance, requestAnalytics, downloadAnalytics } from './reports.js';
+import { setIntroOffer, deleteIntroOffer } from './offers.js';
 import { createWebhook, deleteWebhook, pingWebhook, redeliverWebhook, setWebhookEnabled, webhookReceiver, webhookSecret } from './webhooks.js';
 import { setupKey } from './key-setup.js';
 import * as prep from './release-prep.js';
@@ -104,6 +105,9 @@ const HELP = `apple-connect-mcp <command> [--config /absolute/config.json]
   product-version-create --account NAME --app ID --kind iap|subscription|subscription-group --product ID
   product-version-localize --account NAME --app ID --kind iap|subscription|subscription-group --product ID --version ID --locale en-US --name TEXT [--description TEXT] [--custom-app-name TEXT]
   product-version-image-upload --account NAME --app ID --kind iap|subscription --product ID --version ID --file /absolute/image.png
+  intro-offer-set --account NAME --app ID --subscription ID --territory USA --offer-mode FREE_TRIAL|PAY_AS_YOU_GO|PAY_UP_FRONT
+                  --duration ONE_WEEK --periods 1 [--price 0.99] [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD] [--replace] [--execute]
+  intro-offer-delete --account NAME --app ID --subscription ID --offer ID
   app-price-set --account NAME --app ID --territory USA --price 4.99 [--start-date YYYY-MM-DD] [--execute]
   iap-price-set --account NAME --app ID --iap ID --territory USA --price 4.99 [--start-date YYYY-MM-DD] [--execute]
   subscription-price-set --account NAME --app ID --subscription ID --territory USA --price 4.99
@@ -111,6 +115,7 @@ const HELP = `apple-connect-mcp <command> [--config /absolute/config.json]
 
  Reports
   sales-download --account NAME --vendor NUMBER --type SALES --subtype SUMMARY --frequency DAILY --from YYYY-MM-DD --to YYYY-MM-DD --out /absolute/sales.tsv [--report-version 1_0]
+  finance-download --account NAME --vendor NUMBER --type FINANCIAL|FINANCE_DETAIL --region-code ZZ --from YYYY-MM --to YYYY-MM --out /absolute/finance.tsv
   analytics-request --account NAME --app ID [--access ONGOING|ONE_TIME_SNAPSHOT]
   analytics-download --account NAME --app ID --report-name NAME --granularity DAILY [--category COMMERCE] [--from YYYY-MM-DD] [--to YYYY-MM-DD] --out /absolute/analytics.tsv
 
@@ -155,7 +160,7 @@ const options = {
   submission: { type: 'string' }, item: { type: 'string' }, state: { type: 'string' }, 'feedback-email': { type: 'string' }, 'public-link': { type: 'boolean' }, feedback: { type: 'boolean' }, emails: { type: 'string' }, tester: { type: 'string' }, review: { type: 'string' }, text: { type: 'string' }, identifier: { type: 'string' }, individual: { type: 'boolean' },
   placements: { type: 'string' }, 'preview-frame': { type: 'string' }, asset: { type: 'string' }, images: { type: 'string' }, videos: { type: 'string' }, video: { type: 'string' }, replace: { type: 'boolean' }, placement: { type: 'string' },
   'version-string': { type: 'string' }, 'product-id': { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, period: { type: 'string' }, 'group-level': { type: 'string' }, iap: { type: 'string' }, subscription: { type: 'string' }, locale: { type: 'string' }, description: { type: 'string' }, kind: { type: 'string' }, product: { type: 'string' }, 'custom-app-name': { type: 'string' },
-  territory: { type: 'string' }, price: { type: 'string' }, 'start-date': { type: 'string' }, 'preserve-current-price': { type: 'boolean' },
+  territory: { type: 'string' }, 'offer-mode': { type: 'string' }, duration: { type: 'string' }, periods: { type: 'string' }, 'end-date': { type: 'string' }, offer: { type: 'string' }, 'region-code': { type: 'string' }, price: { type: 'string' }, 'start-date': { type: 'string' }, 'preserve-current-price': { type: 'boolean' },
   vendor: { type: 'string' }, subtype: { type: 'string' }, frequency: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, out: { type: 'string' }, 'report-version': { type: 'string' }, access: { type: 'string' }, 'report-name': { type: 'string' }, granularity: { type: 'string' }, category: { type: 'string' },
   issuer: { type: 'string' }, p8: { type: 'string' }, 'key-id': { type: 'string' }, 'allow-app': { type: 'string' }, url: { type: 'string' }, events: { type: 'string' }, webhook: { type: 'string' }, delivery: { type: 'string' }, port: { type: 'string' }, limit: { type: 'string' },
   'display-type': { type: 'string' }, upload: { type: 'string' }, 'timeout-minutes': { type: 'string' }, 'interval-seconds': { type: 'string' }, 'older-than-hours': { type: 'string' }, 'manual-checks': { type: 'string' },
@@ -387,6 +392,17 @@ const commands: Record<string, Handler> = {
     const a = required(v, 'vendor', 'type', 'subtype', 'frequency', 'from', 'to', 'out');
     return downloadSales({ vendorNumber: a.vendor, reportType: a.type, reportSubType: a.subtype, frequency: a.frequency, from: a.from, to: a.to, out: a.out, version: v['report-version'] }, screenshotClient(account()));
   },
+  'finance-download': async (v, { account }) => {
+    const a = required(v, 'vendor', 'type', 'region-code', 'from', 'to', 'out');
+    return downloadFinance({ vendorNumber: a.vendor, reportType: a.type, regionCode: a['region-code'], from: a.from, to: a.to, out: a.out }, screenshotClient(account()));
+  },
+  'intro-offer-set': async (v, { account }) => {
+    const a = required(v, 'app', 'subscription', 'territory', 'offer-mode', 'duration', 'periods');
+    const acc = account();
+    return setIntroOffer({ account: acc, appId: a.app, subscriptionId: a.subscription, territory: a.territory, offerMode: a['offer-mode'], duration: a.duration,
+      numberOfPeriods: Number(a.periods), price: v.price, startDate: v['start-date'], endDate: v['end-date'], replace: v.replace === true, execute: v.execute === true }, screenshotClient(acc));
+  },
+  'intro-offer-delete': async (v, { account }) => { const a = required(v, 'app', 'subscription', 'offer'); const acc = account(); return deleteIntroOffer({ account: acc, appId: a.app, subscriptionId: a.subscription, offerId: a.offer }, screenshotClient(acc)); },
   'analytics-request': async (v, { account }) => {
     const a = required(v, 'app');
     const access = v.access ?? 'ONGOING';
@@ -431,10 +447,10 @@ const WRITES: Record<string, Capability> = {
   'creative-submit': 'review', 'release-submit': 'review', 'release-publish': 'release',
   'iap-create': 'commercial', 'subscription-group-create': 'commercial', 'subscription-create': 'commercial', 'product-localize': 'commercial',
   'product-version-create': 'commercial', 'product-version-localize': 'commercial', 'product-version-image-upload': 'commercial',
-  'app-price-set': 'commercial', 'iap-price-set': 'commercial', 'subscription-price-set': 'commercial',
+  'app-price-set': 'commercial', 'iap-price-set': 'commercial', 'subscription-price-set': 'commercial', 'intro-offer-set': 'commercial', 'intro-offer-delete': 'commercial',
   'analytics-request': 'admin', 'webhook-create': 'admin', 'webhook-enable': 'admin', 'webhook-disable': 'admin', 'webhook-ping': 'admin', 'webhook-delete': 'admin', 'webhook-redeliver': 'admin',
 };
-const DRY_RUN_UNLESS_EXECUTE = new Set(['metadata-sync', 'screenshots-sync', 'availability-set', 'asset-cleanup', 'app-price-set', 'iap-price-set', 'subscription-price-set']);
+const DRY_RUN_UNLESS_EXECUTE = new Set(['intro-offer-set', 'metadata-sync', 'screenshots-sync', 'availability-set', 'asset-cleanup', 'app-price-set', 'iap-price-set', 'subscription-price-set']);
 
 /** Resume and apply commands name a journal entry, not an app; resolve it so audit and lease see the real target. */
 function writeTarget(command: string, values: Values, store: PlanStore): { account?: string; appId?: string } {

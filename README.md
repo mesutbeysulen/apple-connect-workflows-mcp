@@ -24,8 +24,8 @@ https://github.com/mesutbeysulen/apple-connect-workflows-mcp — install this MC
 | Media | Upload and arrange Asset Library screenshots; upload app previews and creative assets; resume interrupted transfers |
 | Builds and TestFlight | Upload IPA/PKG files, monitor processing, manage beta groups and testers, distribute builds, submit beta review |
 | App Review and release | Check readiness, submit versions, manage phased release, publish manual releases, reply to reviews |
-| Commerce | Manage in-app purchases, subscriptions, localizations, and price schedules |
-| Reporting | Download sales and analytics reports; request analytics reports |
+| Commerce | Manage in-app purchases, subscriptions, localizations, price schedules, and subscription introductory offers such as free trials |
+| Reporting | Download sales, finance, and analytics reports; request analytics reports |
 | Webhooks and API access | Manage webhooks, inspect delivery events, search the API catalog, and prepare catalog-backed API writes |
 
 Run `workflow_catalog` in your MCP client for the complete list of CLI workflows and their arguments. Focused MCP tools such as `apps_list`, `versions_list`, `localizations_list`, and `release_readiness` are available for common reads.
@@ -45,26 +45,26 @@ Run `workflow_catalog` in your MCP client for the complete list of CLI workflows
 Use the published version with Node.js 24 or newer:
 
 ```sh
-npx -y apple-connect-workflows-mcp@0.3.0 --help
+npx -y apple-connect-workflows-mcp@0.4.0 --help
 ```
 
 For a team API key, create a local config file. The tool copies the key into a private local directory; pass only its file path:
 
 ```sh
-npx -y apple-connect-workflows-mcp@0.3.0 key-setup \
+npx -y apple-connect-workflows-mcp@0.4.0 key-setup \
   --config "$HOME/.apple-connect-mcp/config.json" \
   --name main --issuer YOUR_ISSUER_UUID \
   --p8 /absolute/path/AuthKey_ABCDEFGHIJ.p8
 ```
 
-For an individual key, replace `--issuer YOUR_ISSUER_UUID` with `--individual`. Register the MCP server with your client using `npx -y apple-connect-workflows-mcp@0.3.0 serve` and `APPLE_CONNECT_CONFIG` set to the config path. For Codex CLI:
+For an individual key, replace `--issuer YOUR_ISSUER_UUID` with `--individual`. Register the MCP server with your client using `npx -y apple-connect-workflows-mcp@0.4.0 serve` and `APPLE_CONNECT_CONFIG` set to the config path. For Codex CLI:
 
 ```sh
 codex mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.3.0 serve
+  npx -y apple-connect-workflows-mcp@0.4.0 serve
 ```
 
-Run `npx -y apple-connect-workflows-mcp@0.3.0 doctor --config "$HOME/.apple-connect-mcp/config.json"` to check the selected account. Accounts start read-only.
+Run `npx -y apple-connect-workflows-mcp@0.4.0 doctor --config "$HOME/.apple-connect-mcp/config.json"` to check the selected account. Accounts start read-only.
 
 ## Manual installation
 
@@ -233,6 +233,12 @@ npm run build
 ```
 
 CI runs the checks on Node.js 24 and 26. To regenerate the API catalog from an Apple OpenAPI document, run `npm run catalog -- /absolute/path/to/openapi.oas.json`.
+
+### Releasing
+
+Bump `version` in `package.json` and push to `main`. The Release workflow runs only when npm does not have that version yet: it runs the checks and tests, publishes to npm with provenance, then creates the `v<version>` tag and a GitHub release. Other pushes skip it.
+
+Publishing uses npm trusted publishing. On npmjs.com, add a trusted publisher for this package with GitHub Actions, this repository and the workflow file `release.yml`. An `NPM_TOKEN` repository secret also works if you prefer a token.
 
 ## License
 

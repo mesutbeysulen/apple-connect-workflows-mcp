@@ -121,6 +121,34 @@ export async function downloadSales(input: SalesInput, api: ReportAPI): Promise<
     return { out, rows: await spool.write(out), downloaded, missing };
   } finally { await spool.close(); }
 }
+export interface FinanceInput { vendorNumber: string; reportType: string; regionCode: string; from: string; to: string; out: string }
+/** Downloads monthly finance reports (Apple fiscal months, YYYY-MM) and merges them like sales reports. */
+export async function downloadFinance(input: FinanceInput, api: ReportAPI): Promise<{ out: string | null; rows: number; downloaded: string[]; missing: string[]; note?: string }> {
+  const { vendorNumber, reportType, regionCode, from, to, out } = input;
+  if (!/^\d{1,20}$/.test(vendorNumber)) throw new Error('Vendor number must be numeric.');
+  if (!['FINANCIAL', 'FINANCE_DETAIL'].includes(reportType)) throw new Error('Finance report type must be FINANCIAL or FINANCE_DETAIL.');
+  if (!/^[A-Z0-9]{2}$/.test(regionCode)) throw new Error('Region code must be two letters or digits, such as ZZ or US.');
+  if (![from, to].every(month => /^\d{4}-(0[1-9]|1[0-2])$/.test(month))) throw new Error('--from and --to must be fiscal months as YYYY-MM.');
+  const months = reportPeriods('MONTHLY', `${from}-01`, `${to}-01`);
+  const spool = await ReportSpool.open(out, 'fiscal_month');
+  const downloaded: string[] = [];
+  const missing: string[] = [];
+  try {
+    for (const month of months) {
+      const query = new URLSearchParams({ 'filter[vendorNumber]': vendorNumber, 'filter[reportType]': reportType, 'filter[regionCode]': regionCode, 'filter[reportDate]': month });
+      try { await spool.add(month, await api.download(`/v1/financeReports?${query}`, 'application/a-gzip')); downloaded.push(month); }
+      catch (error) {
+        if (error instanceof AppleError && error.status === 404) { missing.push(month); continue; }
+        if (!spool.size) throw error;
+        const partial = `${out}.partial`;
+        await spool.write(partial);
+        throw new Error(`${error instanceof Error ? error.message : 'Download failed'} Stopped at ${month}; ${downloaded.length} earlier month(s) saved to ${partial}.`);
+      }
+    }
+    if (!spool.size) return { out: null, rows: 0, downloaded, missing, note: 'Apple has no finance data for this range; no file was written.' };
+    return { out, rows: await spool.write(out), downloaded, missing };
+  } finally { await spool.close(); }
+}
 /** Opens analytics report access for an app. Apple needs time before the first instances appear. */
 export async function requestAnalytics(input: { account: Account; appId: string; accessType: 'ONGOING' | 'ONE_TIME_SNAPSHOT' }, api: ReportAPI): Promise<{ status: 'exists' | 'created'; requestId: string }> {
   const { account, appId, accessType } = input;
