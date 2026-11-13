@@ -202,6 +202,34 @@ export function createServer(service: ConnectService, configPath?: string): McpS
     const prefix = kind === 'iap' ? 'inAppPurchaseVersions' : 'subscriptionVersions';
     return output(await service.api(account).list(`/v1/${prefix}/${versionId}/images?limit=200`, 2000));
   });
+  server.registerTool('product_availability_get', {
+    description: 'Read the territories where an in-app purchase or subscription is sold. An empty list means the product cannot be bought anywhere yet.',
+    inputSchema: z.object({ account: z.string(), kind: z.enum(['iap', 'subscription']), productId: idSchema }).strict(), annotations: read,
+  }, async ({ account, kind, productId }) => {
+    const api = service.api(account);
+    const path = kind === 'iap' ? `/v2/inAppPurchases/${productId}/inAppPurchaseAvailability` : `/v1/subscriptions/${productId}/subscriptionAvailability`;
+    let availability: Awaited<ReturnType<typeof api.get>> | null = null;
+    try { availability = await api.get(path); } catch (error) { if (!(error instanceof Error && /HTTP 404/.test(error.message))) throw error; }
+    if (!availability) return output({ availability: null, territories: [] });
+    const resource = kind === 'iap' ? 'inAppPurchaseAvailabilities' : 'subscriptionAvailabilities';
+    return output({ availability, territories: (await api.list(`/v1/${resource}/${availability.id}/availableTerritories?limit=200`, 2000)).data.map(row => row.id) });
+  });
+  server.registerTool('promotional_offers_list', {
+    description: 'List promotional offers of one subscription, with their prices.',
+    inputSchema: z.object({ account: z.string(), subscriptionId: idSchema }).strict(), annotations: read,
+  }, async ({ account, subscriptionId }) => output(await service.api(account).list(`/v1/subscriptions/${subscriptionId}/promotionalOffers?include=prices&limit=200`, 2000)));
+  server.registerTool('offer_codes_list', {
+    description: 'List offer code campaigns of an in-app purchase or subscription, including whether each is active.',
+    inputSchema: z.object({ account: z.string(), kind: z.enum(['iap', 'subscription']), productId: idSchema }).strict(), annotations: read,
+  }, async ({ account, kind, productId }) => output(await service.api(account).list(`${kind === 'iap' ? '/v2/inAppPurchases' : '/v1/subscriptions'}/${productId}/offerCodes?limit=200`, 2000)));
+  server.registerTool('promoted_purchases_list', {
+    description: 'List promoted in-app purchases and subscriptions shown on the App Store product page.',
+    inputSchema: z.object({ account: z.string(), appId: idSchema }).strict(), annotations: read,
+  }, async ({ account, appId }) => output(await service.api(account).list(`/v1/apps/${appId}/promotedPurchases?include=inAppPurchaseV2,subscription&limit=200`, 2000)));
+  server.registerTool('sandbox_testers_list', {
+    description: 'List sandbox test accounts on the team, with storefront and renewal settings. Contains names and emails; treat as personal data.',
+    inputSchema: z.object({ account: z.string() }).strict(), annotations: read,
+  }, async ({ account }) => output(await service.api(account).list('/v2/sandboxTesters?limit=200', 2000)));
   server.registerTool('introductory_offers_list', {
     description: 'List introductory offers (free trials and discounted starts) of one subscription, optionally for one territory.',
     inputSchema: z.object({ account: z.string(), subscriptionId: idSchema, territory: z.string().regex(/^[A-Z]{3}$/).optional() }).strict(), annotations: read,

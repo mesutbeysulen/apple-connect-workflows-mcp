@@ -21,7 +21,7 @@ const PRODUCT_VERSION = {
   'subscription-group': { parent: 'subscriptionGroups', path: '/v1/subscriptionGroups', version: 'subscriptionGroupVersions', relation: 'subscriptionGroup', localization: 'subscriptionGroupLocalizations' },
 } as const;
 
-async function appIaps(api: CommercialAPI, appId: string): Promise<Resource[]> {
+export async function appIaps(api: CommercialAPI, appId: string): Promise<Resource[]> {
   const rows = await api.list(`/v1/apps/${appId}/inAppPurchasesV2?limit=200`, 2000);
   if (rows.truncated) throw new Error('Incomplete in-app purchase list; refusing to continue.');
   return rows.data;

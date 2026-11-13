@@ -20,6 +20,7 @@ import { createIap, createSubscription, createSubscriptionGroup, createProductVe
 import { uploadProductVersionImage } from './product-images.js';
 import { downloadSales, downloadFinance, requestAnalytics, downloadAnalytics } from './reports.js';
 import { setIntroOffer, deleteIntroOffer } from './offers.js';
+import * as extras from './commerce-extras.js';
 import { createWebhook, deleteWebhook, pingWebhook, redeliverWebhook, setWebhookEnabled, webhookReceiver, webhookSecret } from './webhooks.js';
 import { setupKey } from './key-setup.js';
 import * as prep from './release-prep.js';
@@ -108,6 +109,21 @@ const HELP = `apple-connect-mcp <command> [--config /absolute/config.json]
   intro-offer-set --account NAME --app ID --subscription ID --territory USA --offer-mode FREE_TRIAL|PAY_AS_YOU_GO|PAY_UP_FRONT
                   --duration ONE_WEEK --periods 1 [--price 0.99] [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD] [--replace] [--execute]
   intro-offer-delete --account NAME --app ID --subscription ID --offer ID
+  product-availability-set --account NAME --app ID --kind iap|subscription --product ID (--territories USA,TUR | --all) [--new-territories] [--execute]
+  promo-offer-create --account NAME --app ID --subscription ID --name TEXT --offer-code ID --offer-mode MODE --duration ONE_MONTH --periods 1
+                     [--prices USA=0.99,TUR=29.99] [--execute]
+  promo-offer-delete --account NAME --app ID --subscription ID --offer ID
+  offer-code-create --account NAME --app ID --kind iap|subscription --product ID --name TEXT --eligibility NEW,EXPIRED
+                    [--offer-eligibility STACK_WITH_INTRO_OFFERS|REPLACE_INTRO_OFFERS --offer-mode MODE --duration D --periods N] [--prices USA=0.99] [--execute]
+  offer-code-activate|offer-code-deactivate --account NAME --app ID --kind iap|subscription --product ID --offer-code ID
+  offer-codes-generate --account NAME --app ID --kind iap|subscription --product ID --offer-code ID --count 100 --expires YYYY-MM-DD
+                       [--environment PRODUCTION|SANDBOX] --out /absolute/codes.csv [--execute]
+  offer-custom-code-create --account NAME --app ID --kind iap|subscription --product ID --offer-code ID --custom-code SPRING25 --count 1000 [--expires YYYY-MM-DD]
+  promoted-purchase-set --account NAME --app ID --kind iap|subscription --product ID [--visible-all true|false] [--enabled true|false]
+  promoted-purchase-delete --account NAME --app ID --promoted ID
+  product-review-screenshot-upload --account NAME --app ID --kind iap|subscription --product ID --file /absolute/screenshot.png
+  sandbox-tester-update --account NAME --tester ID [--territory USA] [--interrupt-purchases true|false] [--renewal-rate MONTHLY_RENEWAL_EVERY_FIVE_MINUTES]
+  sandbox-history-clear --account NAME --testers ID1,ID2
   app-price-set --account NAME --app ID --territory USA --price 4.99 [--start-date YYYY-MM-DD] [--execute]
   iap-price-set --account NAME --app ID --iap ID --territory USA --price 4.99 [--start-date YYYY-MM-DD] [--execute]
   subscription-price-set --account NAME --app ID --subscription ID --territory USA --price 4.99
@@ -160,7 +176,7 @@ const options = {
   submission: { type: 'string' }, item: { type: 'string' }, state: { type: 'string' }, 'feedback-email': { type: 'string' }, 'public-link': { type: 'boolean' }, feedback: { type: 'boolean' }, emails: { type: 'string' }, tester: { type: 'string' }, review: { type: 'string' }, text: { type: 'string' }, identifier: { type: 'string' }, individual: { type: 'boolean' },
   placements: { type: 'string' }, 'preview-frame': { type: 'string' }, asset: { type: 'string' }, images: { type: 'string' }, videos: { type: 'string' }, video: { type: 'string' }, replace: { type: 'boolean' }, placement: { type: 'string' },
   'version-string': { type: 'string' }, 'product-id': { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, period: { type: 'string' }, 'group-level': { type: 'string' }, iap: { type: 'string' }, subscription: { type: 'string' }, locale: { type: 'string' }, description: { type: 'string' }, kind: { type: 'string' }, product: { type: 'string' }, 'custom-app-name': { type: 'string' },
-  territory: { type: 'string' }, 'offer-mode': { type: 'string' }, duration: { type: 'string' }, periods: { type: 'string' }, 'end-date': { type: 'string' }, offer: { type: 'string' }, 'region-code': { type: 'string' }, price: { type: 'string' }, 'start-date': { type: 'string' }, 'preserve-current-price': { type: 'boolean' },
+  territory: { type: 'string' }, all: { type: 'boolean' }, 'offer-code': { type: 'string' }, prices: { type: 'string' }, eligibility: { type: 'string' }, 'offer-eligibility': { type: 'string' }, count: { type: 'string' }, expires: { type: 'string' }, environment: { type: 'string' }, 'custom-code': { type: 'string' }, 'visible-all': { type: 'string' }, enabled: { type: 'string' }, promoted: { type: 'string' }, 'interrupt-purchases': { type: 'string' }, 'renewal-rate': { type: 'string' }, testers: { type: 'string' }, 'offer-mode': { type: 'string' }, duration: { type: 'string' }, periods: { type: 'string' }, 'end-date': { type: 'string' }, offer: { type: 'string' }, 'region-code': { type: 'string' }, price: { type: 'string' }, 'start-date': { type: 'string' }, 'preserve-current-price': { type: 'boolean' },
   vendor: { type: 'string' }, subtype: { type: 'string' }, frequency: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, out: { type: 'string' }, 'report-version': { type: 'string' }, access: { type: 'string' }, 'report-name': { type: 'string' }, granularity: { type: 'string' }, category: { type: 'string' },
   issuer: { type: 'string' }, p8: { type: 'string' }, 'key-id': { type: 'string' }, 'allow-app': { type: 'string' }, url: { type: 'string' }, events: { type: 'string' }, webhook: { type: 'string' }, delivery: { type: 'string' }, port: { type: 'string' }, limit: { type: 'string' },
   'display-type': { type: 'string' }, upload: { type: 'string' }, 'timeout-minutes': { type: 'string' }, 'interval-seconds': { type: 'string' }, 'older-than-hours': { type: 'string' }, 'manual-checks': { type: 'string' },
@@ -173,6 +189,7 @@ function required<K extends keyof Values>(values: Values, ...keys: K[]): { [P in
   if (missing.length) throw new Error(`${missing.map(k => `--${String(k)}`).join(', ')} required.`);
   return values as { [P in K]-?: NonNullable<Values[P]> };
 }
+const kindOf = (value: string): extras.ProductKind => { if (value !== 'iap' && value !== 'subscription') throw new Error('--kind must be iap or subscription.'); return value; };
 const ids = (list: string) => list.split(',').map(s => s.trim()).filter(Boolean);
 function yesNo(value: string | undefined, flag: string): boolean | undefined {
   if (value === undefined) return undefined;
@@ -402,6 +419,45 @@ const commands: Record<string, Handler> = {
     return setIntroOffer({ account: acc, appId: a.app, subscriptionId: a.subscription, territory: a.territory, offerMode: a['offer-mode'], duration: a.duration,
       numberOfPeriods: Number(a.periods), price: v.price, startDate: v['start-date'], endDate: v['end-date'], replace: v.replace === true, execute: v.execute === true }, screenshotClient(acc));
   },
+  'product-availability-set': async (v, { account }) => {
+    const a = required(v, 'app', 'kind', 'product');
+    if ((v.all === true) === !!v.territories) throw new Error('Pass exactly one of --territories or --all.');
+    const acc = account();
+    return extras.setProductAvailability({ account: acc, appId: a.app, kind: kindOf(a.kind), productId: a.product, territories: v.all ? 'all' : ids(v.territories!), availableInNewTerritories: v['new-territories'] === true, execute: v.execute === true }, screenshotClient(acc));
+  },
+  'promo-offer-create': async (v, { account }) => {
+    const a = required(v, 'app', 'subscription', 'name', 'offer-code', 'offer-mode', 'duration', 'periods');
+    const acc = account();
+    return extras.createPromotionalOffer({ account: acc, appId: a.app, subscriptionId: a.subscription, name: a.name, offerCode: a['offer-code'], offerMode: a['offer-mode'], duration: a.duration, numberOfPeriods: Number(a.periods), prices: extras.parsePrices(v.prices), execute: v.execute === true }, screenshotClient(acc));
+  },
+  'promo-offer-delete': async (v, { account }) => { const a = required(v, 'app', 'subscription', 'offer'); const acc = account(); return extras.deletePromotionalOffer({ account: acc, appId: a.app, subscriptionId: a.subscription, offerId: a.offer }, screenshotClient(acc)); },
+  'offer-code-create': async (v, { account }) => {
+    const a = required(v, 'app', 'kind', 'product', 'name', 'eligibility');
+    const acc = account();
+    return extras.createOfferCode({ account: acc, appId: a.app, kind: kindOf(a.kind), productId: a.product, name: a.name, eligibility: ids(a.eligibility), prices: extras.parsePrices(v.prices),
+      offerEligibility: v['offer-eligibility'], offerMode: v['offer-mode'], duration: v.duration, numberOfPeriods: v.periods === undefined ? undefined : Number(v.periods), execute: v.execute === true }, screenshotClient(acc));
+  },
+  'offer-code-activate': async (v, { account }) => { const a = required(v, 'app', 'kind', 'product', 'offer-code'); const acc = account(); return extras.setOfferCodeActive({ account: acc, appId: a.app, kind: kindOf(a.kind), productId: a.product, offerCodeId: a['offer-code'], active: true }, screenshotClient(acc)); },
+  'offer-code-deactivate': async (v, { account }) => { const a = required(v, 'app', 'kind', 'product', 'offer-code'); const acc = account(); return extras.setOfferCodeActive({ account: acc, appId: a.app, kind: kindOf(a.kind), productId: a.product, offerCodeId: a['offer-code'], active: false }, screenshotClient(acc)); },
+  'offer-codes-generate': async (v, { account }) => {
+    const a = required(v, 'app', 'kind', 'product', 'offer-code', 'count', 'expires', 'out');
+    const acc = account();
+    return extras.generateOneTimeCodes({ account: acc, appId: a.app, kind: kindOf(a.kind), productId: a.product, offerCodeId: a['offer-code'], count: Number(a.count), expires: a.expires, environment: v.environment, out: a.out, execute: v.execute === true }, screenshotClient(acc));
+  },
+  'offer-custom-code-create': async (v, { account }) => {
+    const a = required(v, 'app', 'kind', 'product', 'offer-code', 'custom-code', 'count');
+    const acc = account();
+    return extras.createCustomCode({ account: acc, appId: a.app, kind: kindOf(a.kind), productId: a.product, offerCodeId: a['offer-code'], customCode: a['custom-code'], count: Number(a.count), expires: v.expires }, screenshotClient(acc));
+  },
+  'promoted-purchase-set': async (v, { account }) => {
+    const a = required(v, 'app', 'kind', 'product');
+    const acc = account();
+    return extras.setPromotedPurchase({ account: acc, appId: a.app, kind: kindOf(a.kind), productId: a.product, visibleForAllUsers: yesNo(v['visible-all'], '--visible-all'), enabled: yesNo(v.enabled, '--enabled') }, screenshotClient(acc));
+  },
+  'promoted-purchase-delete': async (v, { account }) => { const a = required(v, 'app', 'promoted'); const acc = account(); return extras.deletePromotedPurchase({ account: acc, appId: a.app, promotedPurchaseId: a.promoted }, screenshotClient(acc)); },
+  'product-review-screenshot-upload': async (v, { account }) => { const a = required(v, 'app', 'kind', 'product', 'file'); const acc = account(); return extras.uploadProductReviewScreenshot({ account: acc, appId: a.app, kind: kindOf(a.kind), productId: a.product, filePath: a.file }, screenshotClient(acc)); },
+  'sandbox-tester-update': async (v, { account }) => { const a = required(v, 'tester'); return extras.updateSandboxTester({ account: account(), testerId: a.tester, territory: v.territory, interruptPurchases: yesNo(v['interrupt-purchases'], '--interrupt-purchases'), renewalRate: v['renewal-rate'] }, screenshotClient(account())); },
+  'sandbox-history-clear': async (v, { account }) => { const a = required(v, 'testers'); return extras.clearSandboxHistory({ account: account(), testerIds: ids(a.testers) }, screenshotClient(account())); },
   'intro-offer-delete': async (v, { account }) => { const a = required(v, 'app', 'subscription', 'offer'); const acc = account(); return deleteIntroOffer({ account: acc, appId: a.app, subscriptionId: a.subscription, offerId: a.offer }, screenshotClient(acc)); },
   'analytics-request': async (v, { account }) => {
     const a = required(v, 'app');
@@ -447,10 +503,10 @@ const WRITES: Record<string, Capability> = {
   'creative-submit': 'review', 'release-submit': 'review', 'release-publish': 'release',
   'iap-create': 'commercial', 'subscription-group-create': 'commercial', 'subscription-create': 'commercial', 'product-localize': 'commercial',
   'product-version-create': 'commercial', 'product-version-localize': 'commercial', 'product-version-image-upload': 'commercial',
-  'app-price-set': 'commercial', 'iap-price-set': 'commercial', 'subscription-price-set': 'commercial', 'intro-offer-set': 'commercial', 'intro-offer-delete': 'commercial',
+  'app-price-set': 'commercial', 'iap-price-set': 'commercial', 'subscription-price-set': 'commercial', 'intro-offer-set': 'commercial', 'intro-offer-delete': 'commercial', 'product-availability-set': 'commercial', 'promo-offer-create': 'commercial', 'promo-offer-delete': 'commercial', 'offer-code-create': 'commercial', 'offer-code-activate': 'commercial', 'offer-code-deactivate': 'commercial', 'offer-codes-generate': 'commercial', 'offer-custom-code-create': 'commercial', 'promoted-purchase-set': 'commercial', 'promoted-purchase-delete': 'commercial', 'product-review-screenshot-upload': 'upload', 'sandbox-tester-update': 'admin', 'sandbox-history-clear': 'admin',
   'analytics-request': 'admin', 'webhook-create': 'admin', 'webhook-enable': 'admin', 'webhook-disable': 'admin', 'webhook-ping': 'admin', 'webhook-delete': 'admin', 'webhook-redeliver': 'admin',
 };
-const DRY_RUN_UNLESS_EXECUTE = new Set(['intro-offer-set', 'metadata-sync', 'screenshots-sync', 'availability-set', 'asset-cleanup', 'app-price-set', 'iap-price-set', 'subscription-price-set']);
+const DRY_RUN_UNLESS_EXECUTE = new Set(['product-availability-set', 'promo-offer-create', 'offer-code-create', 'offer-codes-generate', 'intro-offer-set', 'metadata-sync', 'screenshots-sync', 'availability-set', 'asset-cleanup', 'app-price-set', 'iap-price-set', 'subscription-price-set']);
 
 /** Resume and apply commands name a journal entry, not an app; resolve it so audit and lease see the real target. */
 function writeTarget(command: string, values: Values, store: PlanStore): { account?: string; appId?: string } {
