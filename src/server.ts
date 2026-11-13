@@ -202,6 +202,30 @@ export function createServer(service: ConnectService, configPath?: string): McpS
     const prefix = kind === 'iap' ? 'inAppPurchaseVersions' : 'subscriptionVersions';
     return output(await service.api(account).list(`/v1/${prefix}/${versionId}/images?limit=200`, 2000));
   });
+  server.registerTool('users_list', {
+    description: 'List team members with roles and whether they see all apps. Contains names and emails; treat as personal data.',
+    inputSchema: z.object({ account: z.string() }).strict(), annotations: read,
+  }, async ({ account }) => output(await service.api(account).list('/v1/users?limit=200', 2000)));
+  server.registerTool('user_invitations_list', {
+    description: 'List pending team invitations. Contains emails; treat as personal data.',
+    inputSchema: z.object({ account: z.string() }).strict(), annotations: read,
+  }, async ({ account }) => output(await service.api(account).list('/v1/userInvitations?limit=200', 2000)));
+  server.registerTool('devices_list', {
+    description: 'List registered test devices with UDID, platform and status.',
+    inputSchema: z.object({ account: z.string() }).strict(), annotations: read,
+  }, async ({ account }) => output(await service.api(account).list('/v1/devices?limit=200', 2000)));
+  server.registerTool('certificates_list', {
+    description: 'List signing certificates with type and expiry. Certificate content is not returned.',
+    inputSchema: z.object({ account: z.string(), type: z.string().regex(/^[A-Z_0-9]{3,40}$/).optional() }).strict(), annotations: read,
+  }, async ({ account, type }) => output(await service.api(account).list(`/v1/certificates?${new URLSearchParams({ limit: '200', ...(type ? { 'filter[certificateType]': type } : {}) })}`, 2000)));
+  server.registerTool('profiles_list', {
+    description: 'List provisioning profiles with type, state and expiry. Profile content is not returned; use the CLI profile-download command to save one.',
+    inputSchema: z.object({ account: z.string() }).strict(), annotations: read,
+  }, async ({ account }) => output(await service.api(account).list('/v1/profiles?limit=200', 2000)));
+  server.registerTool('bundle_id_capabilities', {
+    description: 'List the capabilities enabled on one App ID.',
+    inputSchema: z.object({ account: z.string(), bundleId: idSchema }).strict(), annotations: read,
+  }, async ({ account, bundleId }) => output(await service.api(account).list(`/v1/bundleIds/${bundleId}/bundleIdCapabilities?limit=200`, 2000)));
   server.registerTool('custom_product_pages_list', {
     description: 'List Custom Product Pages of an app with their versions and states. Localization IDs come from custom_product_page_localizations.',
     inputSchema: z.object({ account: z.string(), appId: idSchema }).strict(), annotations: read,

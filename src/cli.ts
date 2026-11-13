@@ -22,6 +22,7 @@ import { downloadSales, downloadFinance, requestAnalytics, downloadAnalytics } f
 import { setIntroOffer, deleteIntroOffer } from './offers.js';
 import * as extras from './commerce-extras.js';
 import * as marketing from './marketing.js';
+import * as team from './team-signing.js';
 import { createWebhook, deleteWebhook, pingWebhook, redeliverWebhook, setWebhookEnabled, webhookReceiver, webhookSecret } from './webhooks.js';
 import { setupKey } from './key-setup.js';
 import * as prep from './release-prep.js';
@@ -157,6 +158,22 @@ const HELP = `apple-connect-mcp <command> [--config /absolute/config.json]
   analytics-download --account NAME --app ID --report-name NAME --granularity DAILY [--category COMMERCE] [--from YYYY-MM-DD] [--to YYYY-MM-DD] --out /absolute/analytics.tsv
 
  Team
+  user-invite --account NAME --email X --first-name X --last-name X --roles DEVELOPER,APP_MANAGER (--all-apps | --apps ID,...) [--provisioning true|false] [--execute]
+  user-update --account NAME --user ID [--roles A,B] [--all-apps | --apps ID,...] [--provisioning true|false] [--execute]
+  user-remove --account NAME --user ID [--execute]
+  invitation-cancel --account NAME --invitation ID
+
+ Signing (certificates, profiles, devices, App ID capabilities)
+  device-register --account NAME --name TEXT --udid UDID --platform IOS|MAC_OS
+  device-update --account NAME --device ID [--name TEXT] [--status ENABLED|DISABLED]
+  capability-enable|capability-disable --account NAME --bundle ID --capability PUSH_NOTIFICATIONS
+  certificate-create --account NAME --type IOS_DISTRIBUTION --csr /absolute/request.certSigningRequest --out /absolute/cert.cer [--execute]
+  certificate-revoke --account NAME --certificate ID [--execute]
+  profile-create --account NAME --name TEXT --type IOS_APP_STORE --bundle ID --certificates ID1,ID2 [--devices ID1,ID2 | --all-devices] --out /absolute/x.mobileprovision
+  profile-download --account NAME --profile ID --out /absolute/x.mobileprovision
+  profile-delete --account NAME --profile ID
+
+ Team (keys and webhooks)
   key-setup --name NAME (--issuer UUID | --individual) --p8 /absolute/AuthKey_XXXXXXXXXX.p8 [--key-id ID] [--allow-app ID,...] [--replace]
   webhook-create --account NAME --app ID --name TEXT --url https://... --events A,B   (secret from APPLE_WEBHOOK_SECRET)
   webhook-enable|webhook-disable|webhook-ping|webhook-delete --account NAME --app ID --webhook ID
@@ -197,7 +214,7 @@ const options = {
   submission: { type: 'string' }, item: { type: 'string' }, state: { type: 'string' }, 'feedback-email': { type: 'string' }, 'public-link': { type: 'boolean' }, feedback: { type: 'boolean' }, emails: { type: 'string' }, tester: { type: 'string' }, review: { type: 'string' }, text: { type: 'string' }, identifier: { type: 'string' }, individual: { type: 'boolean' },
   placements: { type: 'string' }, 'preview-frame': { type: 'string' }, asset: { type: 'string' }, images: { type: 'string' }, videos: { type: 'string' }, video: { type: 'string' }, replace: { type: 'boolean' }, placement: { type: 'string' },
   'version-string': { type: 'string' }, 'product-id': { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, period: { type: 'string' }, 'group-level': { type: 'string' }, iap: { type: 'string' }, subscription: { type: 'string' }, locale: { type: 'string' }, description: { type: 'string' }, kind: { type: 'string' }, product: { type: 'string' }, 'custom-app-name': { type: 'string' },
-  territory: { type: 'string' }, page: { type: 'string' }, 'page-version': { type: 'string' }, visible: { type: 'string' }, 'deep-link': { type: 'string' }, badge: { type: 'string' }, purpose: { type: 'string' }, priority: { type: 'string' }, 'purchase-requirement': { type: 'string' }, publish: { type: 'string' }, start: { type: 'string' }, end: { type: 'string' }, event: { type: 'string' }, 'event-name': { type: 'string' }, 'short-description': { type: 'string' }, 'long-description': { type: 'string' }, experiment: { type: 'string' }, traffic: { type: 'string' }, started: { type: 'string' }, treatment: { type: 'string' }, 'icon-name': { type: 'string' }, target: { type: 'string' }, id: { type: 'string' }, all: { type: 'boolean' }, 'offer-code': { type: 'string' }, prices: { type: 'string' }, eligibility: { type: 'string' }, 'offer-eligibility': { type: 'string' }, count: { type: 'string' }, expires: { type: 'string' }, environment: { type: 'string' }, 'custom-code': { type: 'string' }, 'visible-all': { type: 'string' }, enabled: { type: 'string' }, promoted: { type: 'string' }, 'interrupt-purchases': { type: 'string' }, 'renewal-rate': { type: 'string' }, testers: { type: 'string' }, 'offer-mode': { type: 'string' }, duration: { type: 'string' }, periods: { type: 'string' }, 'end-date': { type: 'string' }, offer: { type: 'string' }, 'region-code': { type: 'string' }, price: { type: 'string' }, 'start-date': { type: 'string' }, 'preserve-current-price': { type: 'boolean' },
+  territory: { type: 'string' }, roles: { type: 'string' }, 'all-apps': { type: 'boolean' }, apps: { type: 'string' }, provisioning: { type: 'string' }, user: { type: 'string' }, invitation: { type: 'string' }, udid: { type: 'string' }, device: { type: 'string' }, status: { type: 'string' }, bundle: { type: 'string' }, capability: { type: 'string' }, csr: { type: 'string' }, certificate: { type: 'string' }, certificates: { type: 'string' }, devices: { type: 'string' }, 'all-devices': { type: 'boolean' }, profile: { type: 'string' }, page: { type: 'string' }, 'page-version': { type: 'string' }, visible: { type: 'string' }, 'deep-link': { type: 'string' }, badge: { type: 'string' }, purpose: { type: 'string' }, priority: { type: 'string' }, 'purchase-requirement': { type: 'string' }, publish: { type: 'string' }, start: { type: 'string' }, end: { type: 'string' }, event: { type: 'string' }, 'event-name': { type: 'string' }, 'short-description': { type: 'string' }, 'long-description': { type: 'string' }, experiment: { type: 'string' }, traffic: { type: 'string' }, started: { type: 'string' }, treatment: { type: 'string' }, 'icon-name': { type: 'string' }, target: { type: 'string' }, id: { type: 'string' }, all: { type: 'boolean' }, 'offer-code': { type: 'string' }, prices: { type: 'string' }, eligibility: { type: 'string' }, 'offer-eligibility': { type: 'string' }, count: { type: 'string' }, expires: { type: 'string' }, environment: { type: 'string' }, 'custom-code': { type: 'string' }, 'visible-all': { type: 'string' }, enabled: { type: 'string' }, promoted: { type: 'string' }, 'interrupt-purchases': { type: 'string' }, 'renewal-rate': { type: 'string' }, testers: { type: 'string' }, 'offer-mode': { type: 'string' }, duration: { type: 'string' }, periods: { type: 'string' }, 'end-date': { type: 'string' }, offer: { type: 'string' }, 'region-code': { type: 'string' }, price: { type: 'string' }, 'start-date': { type: 'string' }, 'preserve-current-price': { type: 'boolean' },
   vendor: { type: 'string' }, subtype: { type: 'string' }, frequency: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, out: { type: 'string' }, 'report-version': { type: 'string' }, access: { type: 'string' }, 'report-name': { type: 'string' }, granularity: { type: 'string' }, category: { type: 'string' },
   issuer: { type: 'string' }, p8: { type: 'string' }, 'key-id': { type: 'string' }, 'allow-app': { type: 'string' }, url: { type: 'string' }, events: { type: 'string' }, webhook: { type: 'string' }, delivery: { type: 'string' }, port: { type: 'string' }, limit: { type: 'string' },
   'display-type': { type: 'string' }, upload: { type: 'string' }, 'timeout-minutes': { type: 'string' }, 'interval-seconds': { type: 'string' }, 'older-than-hours': { type: 'string' }, 'manual-checks': { type: 'string' },
@@ -213,6 +230,8 @@ function required<K extends keyof Values>(values: Values, ...keys: K[]): { [P in
 const kindOf = (value: string): extras.ProductKind => { if (value !== 'iap' && value !== 'subscription') throw new Error('--kind must be iap or subscription.'); return value; };
 const eventFields = (v: Values): marketing.EventFields => ({ badge: v.badge, purpose: v.purpose, priority: v.priority, primaryLocale: v['primary-locale'], deepLink: v['deep-link'],
   purchaseRequirement: v['purchase-requirement'], territories: v.territories === undefined ? undefined : ids(v.territories), publishStart: v.publish, eventStart: v.start, eventEnd: v.end });
+/** --all-apps and --apps are mutually exclusive ways to set which apps a person can see. */
+const access = (v: Values): team.Access => ({ roles: v.roles === undefined ? undefined : ids(v.roles), allAppsVisible: v['all-apps'] === true ? true : undefined, appIds: v.apps === undefined ? undefined : ids(v.apps) });
 const ids = (list: string) => list.split(',').map(s => s.trim()).filter(Boolean);
 function yesNo(value: string | undefined, flag: string): boolean | undefined {
   if (value === undefined) return undefined;
@@ -506,6 +525,26 @@ const commands: Record<string, Handler> = {
     return marketing.orderMarketingAssets({ account: acc, appId: a.app, target: a.target, localizationId: a.localization, placementGroup: a['placement-group'], placementIds: ids(a.order) }, screenshotClient(acc));
   },
   'marketing-submit': async (v, { account }) => { const a = required(v, 'app', 'kind', 'id'); const acc = account(); return marketing.submitMarketing({ account: acc, appId: a.app, kind: a.kind as marketing.MarketingTarget, id: a.id }, screenshotClient(acc)); },
+  'user-invite': async (v, { account }) => {
+    const a = required(v, 'email', 'first-name', 'last-name', 'roles');
+    return team.inviteUser({ account: account(), email: a.email, firstName: a['first-name'], lastName: a['last-name'], ...access(v), roles: ids(a.roles), provisioningAllowed: yesNo(v.provisioning, '--provisioning'), execute: v.execute === true }, screenshotClient(account()));
+  },
+  'user-update': async (v, { account }) => { const a = required(v, 'user'); return team.updateUser({ account: account(), userId: a.user, ...access(v), provisioningAllowed: yesNo(v.provisioning, '--provisioning'), execute: v.execute === true }, screenshotClient(account())); },
+  'user-remove': async (v, { account }) => { const a = required(v, 'user'); return team.removeUser({ account: account(), userId: a.user, execute: v.execute === true }, screenshotClient(account())); },
+  'invitation-cancel': async (v, { account }) => { const a = required(v, 'invitation'); return team.cancelInvitation({ account: account(), invitationId: a.invitation }, screenshotClient(account())); },
+  'device-register': async (v, { account }) => { const a = required(v, 'name', 'udid', 'platform'); return team.registerDevice({ account: account(), name: a.name, udid: a.udid, platform: a.platform }, screenshotClient(account())); },
+  'device-update': async (v, { account }) => { const a = required(v, 'device'); return team.updateDevice({ account: account(), deviceId: a.device, name: v.name, status: v.status }, screenshotClient(account())); },
+  'capability-enable': async (v, { account }) => { const a = required(v, 'bundle', 'capability'); return team.setCapability({ account: account(), bundleId: a.bundle, capability: a.capability, enabled: true }, screenshotClient(account())); },
+  'capability-disable': async (v, { account }) => { const a = required(v, 'bundle', 'capability'); return team.setCapability({ account: account(), bundleId: a.bundle, capability: a.capability, enabled: false }, screenshotClient(account())); },
+  'certificate-create': async (v, { account }) => { const a = required(v, 'type', 'csr', 'out'); return team.createCertificate({ account: account(), type: a.type, csrPath: a.csr, out: a.out, execute: v.execute === true }, screenshotClient(account())); },
+  'certificate-revoke': async (v, { account }) => { const a = required(v, 'certificate'); return team.revokeCertificate({ account: account(), certificateId: a.certificate, execute: v.execute === true }, screenshotClient(account())); },
+  'profile-create': async (v, { account }) => {
+    const a = required(v, 'name', 'type', 'bundle', 'certificates', 'out');
+    if (v.devices && v['all-devices']) throw new Error('Pass --devices or --all-devices, not both.');
+    return team.createProfile({ account: account(), name: a.name, type: a.type, bundleId: a.bundle, certificateIds: ids(a.certificates), deviceIds: v['all-devices'] ? 'all' : v.devices ? ids(v.devices) : undefined, out: a.out }, screenshotClient(account()));
+  },
+  'profile-download': async (v, { account }) => { const a = required(v, 'profile', 'out'); return team.downloadProfile({ profileId: a.profile, out: a.out }, screenshotClient(account())); },
+  'profile-delete': async (v, { account }) => { const a = required(v, 'profile'); return team.deleteProfile({ account: account(), profileId: a.profile }, screenshotClient(account())); },
   'intro-offer-delete': async (v, { account }) => { const a = required(v, 'app', 'subscription', 'offer'); const acc = account(); return deleteIntroOffer({ account: acc, appId: a.app, subscriptionId: a.subscription, offerId: a.offer }, screenshotClient(acc)); },
   'analytics-request': async (v, { account }) => {
     const a = required(v, 'app');
@@ -551,10 +590,10 @@ const WRITES: Record<string, Capability> = {
   'creative-submit': 'review', 'release-submit': 'review', 'release-publish': 'release',
   'iap-create': 'commercial', 'subscription-group-create': 'commercial', 'subscription-create': 'commercial', 'product-localize': 'commercial',
   'product-version-create': 'commercial', 'product-version-localize': 'commercial', 'product-version-image-upload': 'commercial',
-  'app-price-set': 'commercial', 'iap-price-set': 'commercial', 'subscription-price-set': 'commercial', 'intro-offer-set': 'commercial', 'intro-offer-delete': 'commercial', 'product-availability-set': 'commercial', 'promo-offer-create': 'commercial', 'promo-offer-delete': 'commercial', 'offer-code-create': 'commercial', 'offer-code-activate': 'commercial', 'offer-code-deactivate': 'commercial', 'offer-codes-generate': 'commercial', 'offer-custom-code-create': 'commercial', 'promoted-purchase-set': 'commercial', 'promoted-purchase-delete': 'commercial', 'product-review-screenshot-upload': 'upload', 'sandbox-tester-update': 'admin', 'sandbox-history-clear': 'admin', 'cpp-create': 'upload', 'cpp-update': 'upload', 'cpp-delete': 'upload', 'cpp-localize': 'upload', 'event-create': 'upload', 'event-update': 'upload', 'event-delete': 'upload', 'event-localize': 'upload', 'experiment-create': 'upload', 'experiment-update': 'release', 'treatment-create': 'upload', 'treatment-localize': 'upload', 'marketing-place': 'upload', 'marketing-order': 'upload', 'marketing-submit': 'review',
+  'app-price-set': 'commercial', 'iap-price-set': 'commercial', 'subscription-price-set': 'commercial', 'intro-offer-set': 'commercial', 'intro-offer-delete': 'commercial', 'product-availability-set': 'commercial', 'promo-offer-create': 'commercial', 'promo-offer-delete': 'commercial', 'offer-code-create': 'commercial', 'offer-code-activate': 'commercial', 'offer-code-deactivate': 'commercial', 'offer-codes-generate': 'commercial', 'offer-custom-code-create': 'commercial', 'promoted-purchase-set': 'commercial', 'promoted-purchase-delete': 'commercial', 'product-review-screenshot-upload': 'upload', 'sandbox-tester-update': 'admin', 'sandbox-history-clear': 'admin', 'cpp-create': 'upload', 'cpp-update': 'upload', 'cpp-delete': 'upload', 'cpp-localize': 'upload', 'event-create': 'upload', 'event-update': 'upload', 'event-delete': 'upload', 'event-localize': 'upload', 'experiment-create': 'upload', 'experiment-update': 'release', 'treatment-create': 'upload', 'treatment-localize': 'upload', 'marketing-place': 'upload', 'marketing-order': 'upload', 'marketing-submit': 'review', 'user-invite': 'admin', 'user-update': 'admin', 'user-remove': 'admin', 'invitation-cancel': 'admin', 'device-register': 'admin', 'device-update': 'admin', 'capability-enable': 'admin', 'capability-disable': 'admin', 'certificate-create': 'admin', 'certificate-revoke': 'admin', 'profile-create': 'admin', 'profile-delete': 'admin',
   'analytics-request': 'admin', 'webhook-create': 'admin', 'webhook-enable': 'admin', 'webhook-disable': 'admin', 'webhook-ping': 'admin', 'webhook-delete': 'admin', 'webhook-redeliver': 'admin',
 };
-const DRY_RUN_UNLESS_EXECUTE = new Set(['product-availability-set', 'promo-offer-create', 'offer-code-create', 'offer-codes-generate', 'intro-offer-set', 'metadata-sync', 'screenshots-sync', 'availability-set', 'asset-cleanup', 'app-price-set', 'iap-price-set', 'subscription-price-set']);
+const DRY_RUN_UNLESS_EXECUTE = new Set(['user-invite', 'user-update', 'user-remove', 'certificate-create', 'certificate-revoke', 'product-availability-set', 'promo-offer-create', 'offer-code-create', 'offer-codes-generate', 'intro-offer-set', 'metadata-sync', 'screenshots-sync', 'availability-set', 'asset-cleanup', 'app-price-set', 'iap-price-set', 'subscription-price-set']);
 
 /** Resume and apply commands name a journal entry, not an app; resolve it so audit and lease see the real target. */
 function writeTarget(command: string, values: Values, store: PlanStore): { account?: string; appId?: string } {
