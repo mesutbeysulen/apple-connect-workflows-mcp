@@ -21,6 +21,7 @@ import { uploadProductVersionImage } from './product-images.js';
 import { downloadSales, downloadFinance, requestAnalytics, downloadAnalytics } from './reports.js';
 import { setIntroOffer, deleteIntroOffer } from './offers.js';
 import * as extras from './commerce-extras.js';
+import * as marketing from './marketing.js';
 import { createWebhook, deleteWebhook, pingWebhook, redeliverWebhook, setWebhookEnabled, webhookReceiver, webhookSecret } from './webhooks.js';
 import { setupKey } from './key-setup.js';
 import * as prep from './release-prep.js';
@@ -82,6 +83,26 @@ const HELP = `apple-connect-mcp <command> [--config /absolute/config.json]
  Any other App Store Connect write (needs genericWrites: true; prepare plans with the api_write_plan MCP tool)
   api-plan-show --plan ID
   api-apply --plan ID --digest HASH
+
+ Marketing (Custom Product Pages, in-app events, product page A/B tests)
+  cpp-create --account NAME --app ID --name TEXT [--deep-link URL]
+  cpp-update --account NAME --app ID --page ID [--name TEXT] [--visible true|false]
+  cpp-delete --account NAME --app ID --page ID
+  cpp-localize --account NAME --app ID --page-version ID --locale tr [--promotional-text TEXT]
+  event-create --account NAME --app ID --name REFERENCE [--badge LIVE_EVENT] [--purpose ATTRACT_NEW_USERS] [--priority HIGH|NORMAL]
+               [--primary-locale en-US] [--deep-link URL] [--purchase-requirement TEXT]
+               [--territories USA,TUR --publish ISO --start ISO --end ISO]
+  event-update --account NAME --app ID --event ID [same fields as event-create]
+  event-delete --account NAME --app ID --event ID
+  event-localize --account NAME --app ID --event ID --locale tr [--event-name TEXT] [--short-description TEXT] [--long-description TEXT]
+  experiment-create --account NAME --app ID --name TEXT --platform IOS --traffic 30
+  experiment-update --account NAME --app ID --experiment ID [--name TEXT] [--traffic 30] [--started true|false]
+  treatment-create --account NAME --app ID --experiment ID --name TEXT [--icon-name NAME]
+  treatment-localize --account NAME --app ID --treatment ID --locale tr
+  marketing-place --account NAME --app ID --target cpp|experiment|event --localization ID (--image ID | --video ID)
+                  --placement-type TYPE [--placement-group GROUP]
+  marketing-order --account NAME --app ID --target cpp|experiment --localization ID --placement-group GROUP --order ID1,ID2,...
+  marketing-submit --account NAME --app ID --kind cpp|experiment|event --id ID
 
  Header and Search Results (creative assets, iOS 27 / iPadOS 27 or later)
   creative-upload --account NAME --app ID --placements header,search --file /absolute/asset.png|.mov
@@ -176,7 +197,7 @@ const options = {
   submission: { type: 'string' }, item: { type: 'string' }, state: { type: 'string' }, 'feedback-email': { type: 'string' }, 'public-link': { type: 'boolean' }, feedback: { type: 'boolean' }, emails: { type: 'string' }, tester: { type: 'string' }, review: { type: 'string' }, text: { type: 'string' }, identifier: { type: 'string' }, individual: { type: 'boolean' },
   placements: { type: 'string' }, 'preview-frame': { type: 'string' }, asset: { type: 'string' }, images: { type: 'string' }, videos: { type: 'string' }, video: { type: 'string' }, replace: { type: 'boolean' }, placement: { type: 'string' },
   'version-string': { type: 'string' }, 'product-id': { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, period: { type: 'string' }, 'group-level': { type: 'string' }, iap: { type: 'string' }, subscription: { type: 'string' }, locale: { type: 'string' }, description: { type: 'string' }, kind: { type: 'string' }, product: { type: 'string' }, 'custom-app-name': { type: 'string' },
-  territory: { type: 'string' }, all: { type: 'boolean' }, 'offer-code': { type: 'string' }, prices: { type: 'string' }, eligibility: { type: 'string' }, 'offer-eligibility': { type: 'string' }, count: { type: 'string' }, expires: { type: 'string' }, environment: { type: 'string' }, 'custom-code': { type: 'string' }, 'visible-all': { type: 'string' }, enabled: { type: 'string' }, promoted: { type: 'string' }, 'interrupt-purchases': { type: 'string' }, 'renewal-rate': { type: 'string' }, testers: { type: 'string' }, 'offer-mode': { type: 'string' }, duration: { type: 'string' }, periods: { type: 'string' }, 'end-date': { type: 'string' }, offer: { type: 'string' }, 'region-code': { type: 'string' }, price: { type: 'string' }, 'start-date': { type: 'string' }, 'preserve-current-price': { type: 'boolean' },
+  territory: { type: 'string' }, page: { type: 'string' }, 'page-version': { type: 'string' }, visible: { type: 'string' }, 'deep-link': { type: 'string' }, badge: { type: 'string' }, purpose: { type: 'string' }, priority: { type: 'string' }, 'purchase-requirement': { type: 'string' }, publish: { type: 'string' }, start: { type: 'string' }, end: { type: 'string' }, event: { type: 'string' }, 'event-name': { type: 'string' }, 'short-description': { type: 'string' }, 'long-description': { type: 'string' }, experiment: { type: 'string' }, traffic: { type: 'string' }, started: { type: 'string' }, treatment: { type: 'string' }, 'icon-name': { type: 'string' }, target: { type: 'string' }, id: { type: 'string' }, all: { type: 'boolean' }, 'offer-code': { type: 'string' }, prices: { type: 'string' }, eligibility: { type: 'string' }, 'offer-eligibility': { type: 'string' }, count: { type: 'string' }, expires: { type: 'string' }, environment: { type: 'string' }, 'custom-code': { type: 'string' }, 'visible-all': { type: 'string' }, enabled: { type: 'string' }, promoted: { type: 'string' }, 'interrupt-purchases': { type: 'string' }, 'renewal-rate': { type: 'string' }, testers: { type: 'string' }, 'offer-mode': { type: 'string' }, duration: { type: 'string' }, periods: { type: 'string' }, 'end-date': { type: 'string' }, offer: { type: 'string' }, 'region-code': { type: 'string' }, price: { type: 'string' }, 'start-date': { type: 'string' }, 'preserve-current-price': { type: 'boolean' },
   vendor: { type: 'string' }, subtype: { type: 'string' }, frequency: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, out: { type: 'string' }, 'report-version': { type: 'string' }, access: { type: 'string' }, 'report-name': { type: 'string' }, granularity: { type: 'string' }, category: { type: 'string' },
   issuer: { type: 'string' }, p8: { type: 'string' }, 'key-id': { type: 'string' }, 'allow-app': { type: 'string' }, url: { type: 'string' }, events: { type: 'string' }, webhook: { type: 'string' }, delivery: { type: 'string' }, port: { type: 'string' }, limit: { type: 'string' },
   'display-type': { type: 'string' }, upload: { type: 'string' }, 'timeout-minutes': { type: 'string' }, 'interval-seconds': { type: 'string' }, 'older-than-hours': { type: 'string' }, 'manual-checks': { type: 'string' },
@@ -190,6 +211,8 @@ function required<K extends keyof Values>(values: Values, ...keys: K[]): { [P in
   return values as { [P in K]-?: NonNullable<Values[P]> };
 }
 const kindOf = (value: string): extras.ProductKind => { if (value !== 'iap' && value !== 'subscription') throw new Error('--kind must be iap or subscription.'); return value; };
+const eventFields = (v: Values): marketing.EventFields => ({ badge: v.badge, purpose: v.purpose, priority: v.priority, primaryLocale: v['primary-locale'], deepLink: v['deep-link'],
+  purchaseRequirement: v['purchase-requirement'], territories: v.territories === undefined ? undefined : ids(v.territories), publishStart: v.publish, eventStart: v.start, eventEnd: v.end });
 const ids = (list: string) => list.split(',').map(s => s.trim()).filter(Boolean);
 function yesNo(value: string | undefined, flag: string): boolean | undefined {
   if (value === undefined) return undefined;
@@ -458,6 +481,31 @@ const commands: Record<string, Handler> = {
   'product-review-screenshot-upload': async (v, { account }) => { const a = required(v, 'app', 'kind', 'product', 'file'); const acc = account(); return extras.uploadProductReviewScreenshot({ account: acc, appId: a.app, kind: kindOf(a.kind), productId: a.product, filePath: a.file }, screenshotClient(acc)); },
   'sandbox-tester-update': async (v, { account }) => { const a = required(v, 'tester'); return extras.updateSandboxTester({ account: account(), testerId: a.tester, territory: v.territory, interruptPurchases: yesNo(v['interrupt-purchases'], '--interrupt-purchases'), renewalRate: v['renewal-rate'] }, screenshotClient(account())); },
   'sandbox-history-clear': async (v, { account }) => { const a = required(v, 'testers'); return extras.clearSandboxHistory({ account: account(), testerIds: ids(a.testers) }, screenshotClient(account())); },
+  'cpp-create': async (v, { account }) => { const a = required(v, 'app', 'name'); const acc = account(); return marketing.createCustomPage({ account: acc, appId: a.app, name: a.name, deepLink: v['deep-link'] }, screenshotClient(acc)); },
+  'cpp-update': async (v, { account }) => { const a = required(v, 'app', 'page'); const acc = account(); return marketing.updateCustomPage({ account: acc, appId: a.app, pageId: a.page, name: v.name, visible: yesNo(v.visible, '--visible') }, screenshotClient(acc)); },
+  'cpp-delete': async (v, { account }) => { const a = required(v, 'app', 'page'); const acc = account(); return marketing.deleteCustomPage({ account: acc, appId: a.app, pageId: a.page }, screenshotClient(acc)); },
+  'cpp-localize': async (v, { account }) => { const a = required(v, 'app', 'page-version', 'locale'); const acc = account(); return marketing.localizeCustomPage({ account: acc, appId: a.app, versionId: a['page-version'], locale: a.locale, promotionalText: v['promotional-text'] }, screenshotClient(acc)); },
+  'event-create': async (v, { account }) => { const a = required(v, 'app', 'name'); const acc = account(); return marketing.createEvent({ account: acc, appId: a.app, referenceName: a.name, ...eventFields(v) }, screenshotClient(acc)); },
+  'event-update': async (v, { account }) => { const a = required(v, 'app', 'event'); const acc = account(); return marketing.updateEvent({ account: acc, appId: a.app, eventId: a.event, referenceName: v.name, ...eventFields(v) }, screenshotClient(acc)); },
+  'event-delete': async (v, { account }) => { const a = required(v, 'app', 'event'); const acc = account(); return marketing.deleteEvent({ account: acc, appId: a.app, eventId: a.event }, screenshotClient(acc)); },
+  'event-localize': async (v, { account }) => { const a = required(v, 'app', 'event', 'locale'); const acc = account(); return marketing.localizeEvent({ account: acc, appId: a.app, eventId: a.event, locale: a.locale, name: v['event-name'], shortDescription: v['short-description'], longDescription: v['long-description'] }, screenshotClient(acc)); },
+  'experiment-create': async (v, { account }) => { const a = required(v, 'app', 'name', 'platform', 'traffic'); const acc = account(); return marketing.createExperiment({ account: acc, appId: a.app, name: a.name, platform: a.platform, trafficProportion: Number(a.traffic) }, screenshotClient(acc)); },
+  'experiment-update': async (v, { account }) => { const a = required(v, 'app', 'experiment'); const acc = account(); return marketing.updateExperiment({ account: acc, appId: a.app, experimentId: a.experiment, name: v.name, trafficProportion: v.traffic === undefined ? undefined : Number(v.traffic), started: yesNo(v.started, '--started') }, screenshotClient(acc)); },
+  'treatment-create': async (v, { account }) => { const a = required(v, 'app', 'experiment', 'name'); const acc = account(); return marketing.createTreatment({ account: acc, appId: a.app, experimentId: a.experiment, name: a.name, appIconName: v['icon-name'] }, screenshotClient(acc)); },
+  'treatment-localize': async (v, { account }) => { const a = required(v, 'app', 'treatment', 'locale'); const acc = account(); return marketing.localizeTreatment({ account: acc, appId: a.app, treatmentId: a.treatment, locale: a.locale }, screenshotClient(acc)); },
+  'marketing-place': async (v, { account }) => {
+    const a = required(v, 'app', 'target', 'localization', 'placement-type');
+    if (!!v.image === !!v.video) throw new Error('Pass exactly one of --image or --video.');
+    const acc = account();
+    return marketing.placeMarketingAsset({ account: acc, appId: a.app, target: a.target as marketing.MarketingTarget, localizationId: a.localization, kind: v.image ? 'image' : 'video', assetId: (v.image ?? v.video)!, placementType: a['placement-type'], placementGroup: v['placement-group'] }, screenshotClient(acc));
+  },
+  'marketing-order': async (v, { account }) => {
+    const a = required(v, 'app', 'target', 'localization', 'placement-group', 'order');
+    if (a.target !== 'cpp' && a.target !== 'experiment') throw new Error('--target must be cpp or experiment.');
+    const acc = account();
+    return marketing.orderMarketingAssets({ account: acc, appId: a.app, target: a.target, localizationId: a.localization, placementGroup: a['placement-group'], placementIds: ids(a.order) }, screenshotClient(acc));
+  },
+  'marketing-submit': async (v, { account }) => { const a = required(v, 'app', 'kind', 'id'); const acc = account(); return marketing.submitMarketing({ account: acc, appId: a.app, kind: a.kind as marketing.MarketingTarget, id: a.id }, screenshotClient(acc)); },
   'intro-offer-delete': async (v, { account }) => { const a = required(v, 'app', 'subscription', 'offer'); const acc = account(); return deleteIntroOffer({ account: acc, appId: a.app, subscriptionId: a.subscription, offerId: a.offer }, screenshotClient(acc)); },
   'analytics-request': async (v, { account }) => {
     const a = required(v, 'app');
@@ -503,7 +551,7 @@ const WRITES: Record<string, Capability> = {
   'creative-submit': 'review', 'release-submit': 'review', 'release-publish': 'release',
   'iap-create': 'commercial', 'subscription-group-create': 'commercial', 'subscription-create': 'commercial', 'product-localize': 'commercial',
   'product-version-create': 'commercial', 'product-version-localize': 'commercial', 'product-version-image-upload': 'commercial',
-  'app-price-set': 'commercial', 'iap-price-set': 'commercial', 'subscription-price-set': 'commercial', 'intro-offer-set': 'commercial', 'intro-offer-delete': 'commercial', 'product-availability-set': 'commercial', 'promo-offer-create': 'commercial', 'promo-offer-delete': 'commercial', 'offer-code-create': 'commercial', 'offer-code-activate': 'commercial', 'offer-code-deactivate': 'commercial', 'offer-codes-generate': 'commercial', 'offer-custom-code-create': 'commercial', 'promoted-purchase-set': 'commercial', 'promoted-purchase-delete': 'commercial', 'product-review-screenshot-upload': 'upload', 'sandbox-tester-update': 'admin', 'sandbox-history-clear': 'admin',
+  'app-price-set': 'commercial', 'iap-price-set': 'commercial', 'subscription-price-set': 'commercial', 'intro-offer-set': 'commercial', 'intro-offer-delete': 'commercial', 'product-availability-set': 'commercial', 'promo-offer-create': 'commercial', 'promo-offer-delete': 'commercial', 'offer-code-create': 'commercial', 'offer-code-activate': 'commercial', 'offer-code-deactivate': 'commercial', 'offer-codes-generate': 'commercial', 'offer-custom-code-create': 'commercial', 'promoted-purchase-set': 'commercial', 'promoted-purchase-delete': 'commercial', 'product-review-screenshot-upload': 'upload', 'sandbox-tester-update': 'admin', 'sandbox-history-clear': 'admin', 'cpp-create': 'upload', 'cpp-update': 'upload', 'cpp-delete': 'upload', 'cpp-localize': 'upload', 'event-create': 'upload', 'event-update': 'upload', 'event-delete': 'upload', 'event-localize': 'upload', 'experiment-create': 'upload', 'experiment-update': 'release', 'treatment-create': 'upload', 'treatment-localize': 'upload', 'marketing-place': 'upload', 'marketing-order': 'upload', 'marketing-submit': 'review',
   'analytics-request': 'admin', 'webhook-create': 'admin', 'webhook-enable': 'admin', 'webhook-disable': 'admin', 'webhook-ping': 'admin', 'webhook-delete': 'admin', 'webhook-redeliver': 'admin',
 };
 const DRY_RUN_UNLESS_EXECUTE = new Set(['product-availability-set', 'promo-offer-create', 'offer-code-create', 'offer-codes-generate', 'intro-offer-set', 'metadata-sync', 'screenshots-sync', 'availability-set', 'asset-cleanup', 'app-price-set', 'iap-price-set', 'subscription-price-set']);

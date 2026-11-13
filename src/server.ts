@@ -202,6 +202,35 @@ export function createServer(service: ConnectService, configPath?: string): McpS
     const prefix = kind === 'iap' ? 'inAppPurchaseVersions' : 'subscriptionVersions';
     return output(await service.api(account).list(`/v1/${prefix}/${versionId}/images?limit=200`, 2000));
   });
+  server.registerTool('custom_product_pages_list', {
+    description: 'List Custom Product Pages of an app with their versions and states. Localization IDs come from custom_product_page_localizations.',
+    inputSchema: z.object({ account: z.string(), appId: idSchema }).strict(), annotations: read,
+  }, async ({ account, appId }) => {
+    const api = service.api(account);
+    const pages = await api.list(`/v1/apps/${appId}/appCustomProductPages?limit=200`, 2000);
+    return output(await Promise.all(pages.data.map(async page => ({ page, versions: (await api.list(`/v1/appCustomProductPages/${page.id}/appCustomProductPageVersions?limit=200`, 2000)).data }))));
+  });
+  server.registerTool('custom_product_page_localizations', {
+    description: 'List the languages of one Custom Product Page version, with promotional text.',
+    inputSchema: z.object({ account: z.string(), versionId: idSchema }).strict(), annotations: read,
+  }, async ({ account, versionId }) => output(await service.api(account).list(`/v1/appCustomProductPageVersions/${versionId}/appCustomProductPageLocalizations?limit=200`, 2000)));
+  server.registerTool('app_events_list', {
+    description: 'List in-app events of an app with state, schedule and languages.',
+    inputSchema: z.object({ account: z.string(), appId: idSchema }).strict(), annotations: read,
+  }, async ({ account, appId }) => {
+    const api = service.api(account);
+    const events = await api.list(`/v1/apps/${appId}/appEvents?limit=200`, 2000);
+    return output(await Promise.all(events.data.map(async event => ({ event, localizations: (await api.list(`/v1/appEvents/${event.id}/localizations?limit=200`, 2000)).data }))));
+  });
+  server.registerTool('experiments_list', {
+    description: 'List product page A/B tests of an app with their treatments and treatment languages.',
+    inputSchema: z.object({ account: z.string(), appId: idSchema }).strict(), annotations: read,
+  }, async ({ account, appId }) => {
+    const api = service.api(account);
+    const experiments = await api.list(`/v1/apps/${appId}/appStoreVersionExperimentsV2?limit=200`, 2000);
+    return output(await Promise.all(experiments.data.map(async experiment => ({ experiment, treatments: await Promise.all((await api.list(`/v2/appStoreVersionExperiments/${experiment.id}/appStoreVersionExperimentTreatments?limit=200`, 2000)).data
+      .map(async treatment => ({ treatment, localizations: (await api.list(`/v1/appStoreVersionExperimentTreatments/${treatment.id}/appStoreVersionExperimentTreatmentLocalizations?limit=200`, 2000)).data }))) }))));
+  });
   server.registerTool('product_availability_get', {
     description: 'Read the territories where an in-app purchase or subscription is sold. An empty list means the product cannot be bought anywhere yet.',
     inputSchema: z.object({ account: z.string(), kind: z.enum(['iap', 'subscription']), productId: idSchema }).strict(), annotations: read,

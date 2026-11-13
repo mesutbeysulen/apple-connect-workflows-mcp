@@ -192,7 +192,7 @@ export async function resumeCreative(id: string, account: Account, store: PlanSt
   return transfer(job, await api.get(`/v1/${RESOURCE[job.kind]}/${id}`), api, fetcher, store);
 }
 /** Loads an asset through the app's own library, which also proves it belongs to this app. */
-async function libraryAsset(api: AssetAPI, appId: string, kind: CreativeKind, id: string): Promise<Resource> {
+export async function libraryAsset(api: AssetAPI, appId: string, kind: CreativeKind, id: string): Promise<Resource> {
   if (!validId(id)) throw new Error(`Invalid ${kind} ID.`);
   const libraryId = await assetLibraryId(api, appId);
   const query = new URLSearchParams({ 'filter[id]': id, limit: '1' });
@@ -217,7 +217,7 @@ export async function submitCreatives(input: { account: Account; appId: string; 
   return submitForReview({ account, appId, items }, api);
 }
 export interface PlacementOutcome { target: CreativeTarget; placementId: string; status: 'exists' | 'created'; replaced: string[] }
-const linkedAsset = (row: Resource): { kind: CreativeKind; id: string } | undefined => {
+export const linkedAsset = (row: Resource): { kind: CreativeKind; id: string } | undefined => {
   for (const kind of ['image', 'video'] as const) {
     const data = row.relationships?.[kind]?.data;
     if (data && !Array.isArray(data)) return { kind, id: data.id };
