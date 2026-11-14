@@ -74,11 +74,33 @@ jobs:
           fi
       # Lists this version in the official MCP Registry. GitHub OIDC proves the io.github.mesutbeysulen namespace,
       # so no secret is needed; the registry checks that the npm package's mcpName matches server.json.
+      # Decided separately from npm, so a version the registry missed is listed on the next run.
+      - name: Decide whether the MCP Registry needs this version
+        id: registry
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          name=$(node -p "encodeURIComponent(require('./server.json').name)")
+          code=$(curl --silent --output /dev/null --write-out '%{http_code}' "https://registry.modelcontextprotocol.io/v0/servers/$name/versions/$VERSION")
+          if [ "$code" = 200 ]; then echo "publish=false" >> "$GITHUB_OUTPUT"; echo "Registry already lists $VERSION."
+          elif [ "$code" = 404 ]; then echo "publish=true" >> "$GITHUB_OUTPUT"
+          else echo "Registry answered $code"; exit 1; fi
+      - name: Wait until npm serves this version
+        if: steps.registry.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          name=$(node -p "require('./package.json').name")
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail --output /dev/null "https://registry.npmjs.org/$name/$VERSION"; then exit 0; fi
+            sleep 10
+          done
+          echo "npm does not serve $name@$VERSION after 5 minutes."; exit 1
       - name: Install cosign
-        if: steps.version.outputs.publish == 'true'
+        if: steps.registry.outputs.publish == 'true'
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Publish to the MCP Registry
-        if: steps.version.outputs.publish == 'true'
+        if: steps.registry.outputs.publish == 'true'
         env:
           MCP_PUBLISHER_VERSION: v1.8.1
         run: |
