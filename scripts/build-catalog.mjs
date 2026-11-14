@@ -24,6 +24,12 @@ for (const [path, item] of Object.entries(spec.paths)) {
     endpoints.push({ method: method.toUpperCase(), path, tag: operation.tags?.[0] ?? '', ...(operation.deprecated ? { deprecated: true } : {}), ...(filters.length ? { filters } : {}), ...(body ? { body } : {}) });
   }
 }
+// Apple's win-back offer guide links each inline price to a subscription price point, but the OpenAPI
+// document leaves that relationship out. Keep the bundled schema in line with the documented request.
+const pricePoint = { type: 'object', properties: { subscriptionPricePoint: { type: 'object', properties: { data: { type: 'object', properties: { type: { type: 'string', enum: ['subscriptionPricePoints'] }, id: { type: 'string' } }, required: ['id', 'type'] } } } } };
+for (const name of ['WinBackOfferPriceInlineCreate', 'RetentionOfferPriceInlineCreate']) {
+  if (schemas[name] && !schemas[name].properties?.relationships) schemas[name].properties.relationships = pricePoint;
+}
 const url = name => new URL(`../catalog/${name}`, import.meta.url);
 writeFileSync(url('endpoints.json'), `${JSON.stringify({ apiVersion: spec.info.version, endpoints })}\n`);
 writeFileSync(url('schemas.json'), `${JSON.stringify(Object.fromEntries([...wanted].sort().map(name => [name, schemas[name]])))}\n`);

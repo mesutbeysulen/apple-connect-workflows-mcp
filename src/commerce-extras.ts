@@ -313,3 +313,140 @@ export async function uploadProductReviewScreenshot(input: { account: Account; a
   if (current && !removedFirst && current.id !== reserved.id) await api.delete(`/v1/${resource}/${current.id}`);
   return { status: 'uploaded' as const, screenshotId: reserved.id, replaced: current?.id ?? null, sha256 };
 }
+
+// ---- Win-back offers (bring back lapsed subscribers; Apple's guide "Creating and configuring win-back offers") ----
+export interface WinBackInput {
+  account: Account; appId: string; subscriptionId: string; referenceName: string; offerId: string; offerMode: string; duration: string; periodCount: number;
+  paidMonths: number; lapsedMin: number; lapsedMax: number; waitMonths?: number; startDate: string; endDate?: string; priority: string; promoted: boolean;
+  prices: { territory: string; price: string }[]; execute?: boolean;
+}
+/** Territories and prices cannot change after creation, so this previews unless execute is set. */
+export async function createWinBackOffer(input: WinBackInput, api: ExtrasAPI) {
+  const { account, appId, subscriptionId, referenceName, offerId, offerMode, duration, periodCount, paidMonths, lapsedMin, lapsedMax, waitMonths, startDate, endDate, priority, promoted, execute = false } = input;
+  if (execute) requireWrite(account, appId);
+  if (!OFFER_MODES.includes(offerMode) || offerMode === 'FREE_TRIAL') throw new Error('Win-back offers here support PAY_AS_YOU_GO and PAY_UP_FRONT; each territory price comes from a price point.');
+  if (!OFFER_DURATIONS.includes(duration)) throw new Error(`Duration must be one of ${OFFER_DURATIONS.join(', ')}.`);
+  if (!Number.isInteger(periodCount) || periodCount < 1) throw new Error('Period count must be a whole number of at least 1.');
+  for (const months of [paidMonths, lapsedMin, lapsedMax, ...(waitMonths === undefined ? [] : [waitMonths])]) if (!Number.isInteger(months) || months < 0) throw new Error('Eligibility months must be whole numbers.');
+  if (lapsedMin > lapsedMax) throw new Error('Lapsed-months minimum cannot exceed its maximum.');
+  if (!isDate(startDate) || !isDate(endDate) || (endDate !== undefined && endDate <= startDate)) throw new Error('Dates must be YYYY-MM-DD, with the end after the start.');
+  if (!['HIGH', 'NORMAL'].includes(priority)) throw new Error('Priority must be HIGH or NORMAL.');
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(offerId) || !referenceName.trim()) throw new Error('Provide a reference name and an offer identifier of letters, digits, dot, dash or underscore.');
+  if (!input.prices.length) throw new Error('Win-back offers need --prices, e.g. USA=4.99,TUR=99.99.');
+  await ownedProduct(api, appId, 'subscription', subscriptionId);
+  const prices = await resolvePrices(api, 'subscription', subscriptionId, input.prices);
+  const existing = (await api.list(`/v1/subscriptions/${subscriptionId}/winBackOffers?limit=200`, 2000)).data.find(row => row.attributes.offerId === offerId);
+  const attributes = { referenceName, offerId, offerMode, duration, periodCount, startDate, ...(endDate ? { endDate } : {}), priority,
+    promotionIntent: promoted ? 'USE_AUTO_GENERATED_ASSETS' : 'NOT_PROMOTED', customerEligibilityPaidSubscriptionDurationInMonths: paidMonths,
+    customerEligibilityTimeSinceLastSubscribedInMonths: { minimum: lapsedMin, maximum: lapsedMax }, ...(waitMonths === undefined ? {} : { customerEligibilityWaitBetweenOffersInMonths: waitMonths }) };
+  const preview = { dryRun: !execute, subscriptionId, ...attributes, prices, effect: 'Territories and prices cannot change after creation; a promoted offer also needs an approved promoted-purchase image.' };
+  if (existing) return { ...preview, status: 'exists' as const, offerId: existing.id, url: `https://apps.apple.com/win-back/${existing.id}` };
+  if (!execute) return preview;
+  const created = await api.post('/v1/winBackOffers', { data: { type: 'winBackOffers', attributes,
+    relationships: { subscription: rel('subscriptions', subscriptionId), prices: { data: prices.map((_, i) => ({ type: 'winBackOfferPrices', id: `\${winbackOfferPrice-${i}}` })) } } },
+    included: prices.map((p, i) => ({ type: 'winBackOfferPrices', id: `\${winbackOfferPrice-${i}}`, relationships: { subscriptionPricePoint: rel('subscriptionPricePoints', p.pricePointId) } })) });
+  return { ...preview, status: 'created' as const, offerId: created.id, url: `https://apps.apple.com/win-back/${created.id}` };
+}
+/** Dates, eligibility and priority can change; after an offer is live Apple allows only the priority. */
+export async function updateWinBackOffer(input: { account: Account; appId: string; subscriptionId: string; offerId: string; startDate?: string; endDate?: string; priority?: string; promoted?: boolean; paidMonths?: number; waitMonths?: number }, api: ExtrasAPI) {
+  const { account, appId, subscriptionId, offerId } = input;
+  requireWrite(account, appId);
+  if (!isDate(input.startDate) || !isDate(input.endDate)) throw new Error('Dates must be YYYY-MM-DD.');
+  if (input.priority !== undefined && !['HIGH', 'NORMAL'].includes(input.priority)) throw new Error('Priority must be HIGH or NORMAL.');
+  await ownedProduct(api, appId, 'subscription', subscriptionId);
+  const offer = (await api.list(`/v1/subscriptions/${subscriptionId}/winBackOffers?limit=200`, 2000)).data.find(row => row.id === offerId);
+  if (!offer) throw new Error('Win-back offer does not belong to this subscription.');
+  const fields = Object.fromEntries(Object.entries({ startDate: input.startDate, endDate: input.endDate, priority: input.priority,
+    promotionIntent: input.promoted === undefined ? undefined : input.promoted ? 'USE_AUTO_GENERATED_ASSETS' : 'NOT_PROMOTED',
+    customerEligibilityPaidSubscriptionDurationInMonths: input.paidMonths, customerEligibilityWaitBetweenOffersInMonths: input.waitMonths }).filter(([key, v]) => v !== undefined && offer.attributes[key] !== v));
+  if (!Object.keys(fields).length) return { status: 'unchanged' as const, offerId };
+  await api.patch(`/v1/winBackOffers/${offerId}`, 'winBackOffers', offerId, fields);
+  return { status: 'updated' as const, offerId, changed: Object.keys(fields) };
+}
+export async function deleteWinBackOffer(input: { account: Account; appId: string; subscriptionId: string; offerId: string }, api: ExtrasAPI): Promise<{ removed: string }> {
+  const { account, appId, subscriptionId, offerId } = input;
+  requireWrite(account, appId);
+  await ownedProduct(api, appId, 'subscription', subscriptionId);
+  if (!(await api.list(`/v1/subscriptions/${subscriptionId}/winBackOffers?limit=200`, 2000)).data.some(row => row.id === offerId)) throw new Error('Win-back offer does not belong to this subscription.');
+  await api.delete(`/v1/winBackOffers/${offerId}`);
+  return { removed: offerId };
+}
+
+// ---- Retention messages (shown when a subscriber goes to cancel; available to all developers since November 2026) ----
+async function ownedRetentionMessage(api: ExtrasAPI, appId: string, messageId: string): Promise<Resource> {
+  if (!validId(messageId)) throw new Error('Invalid retention message ID.');
+  const message = (await api.list(`/v1/apps/${appId}/retentionMessages?limit=200`, 2000)).data.find(row => row.id === messageId);
+  if (!message) throw new Error('Retention message does not belong to this app.');
+  return message;
+}
+const LOCKED_STATES = new Set(['WAITING_FOR_REVIEW', 'IN_REVIEW', 'ACCEPTED', 'APPROVED', 'LIVE']);
+async function editableRetentionVersion(api: ExtrasAPI, messageId: string, create: boolean): Promise<Resource> {
+  const versions = (await api.list(`/v1/retentionMessages/${messageId}/versions?limit=200`, 2000)).data;
+  const editable = versions.find(row => !LOCKED_STATES.has(String(row.attributes.state ?? '')));
+  if (editable) return editable;
+  if (!create) throw new Error('Every version of this message is with Apple or live. Run retention-message-create again to open a new version.');
+  return api.post('/v1/retentionMessageVersions', { data: { type: 'retentionMessageVersions', relationships: { retentionMessage: rel('retentionMessages', messageId) } } });
+}
+/** Creates a retention message with an editable version, or opens a new version for an existing one. */
+export async function createRetentionMessage(input: { account: Account; appId: string; referenceName: string }, api: ExtrasAPI) {
+  const { account, appId, referenceName } = input;
+  requireWrite(account, appId);
+  if (!/^\d+$/.test(appId) || !referenceName.trim()) throw new Error('Provide the app and a reference name.');
+  const messages = (await api.list(`/v1/apps/${appId}/retentionMessages?limit=200`, 2000)).data;
+  // Apple's guidance allows up to 10 retention messages per app.
+  let message = messages.find(row => row.attributes.referenceName === referenceName);
+  const status = message ? 'exists' as const : 'created' as const;
+  if (!message && messages.length >= 10) throw new Error('This app already has 10 retention messages, the documented maximum.');
+  message ??= await api.post('/v1/retentionMessages', { data: { type: 'retentionMessages', attributes: { referenceName }, relationships: { app: rel('apps', appId) } } });
+  const version = await editableRetentionVersion(api, message.id, true);
+  return { status, messageId: message.id, versionId: version.id };
+}
+export async function localizeRetentionMessage(input: { account: Account; appId: string; messageId: string; locale: string; header?: string; body?: string }, api: ExtrasAPI) {
+  const { account, appId, messageId, locale, header, body } = input;
+  requireWrite(account, appId);
+  if (!/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(locale)) throw new Error(`Invalid locale ${locale}.`);
+  await ownedRetentionMessage(api, appId, messageId);
+  const version = await editableRetentionVersion(api, messageId, false);
+  const rows = (await api.list(`/v1/retentionMessageVersions/${version.id}/localizations?limit=200`, 2000)).data;
+  const existing = rows.find(row => row.attributes.locale === locale);
+  const fields = Object.fromEntries(Object.entries({ header, body }).filter(([, v]) => v !== undefined));
+  if (!existing) {
+    if (!header || !body) throw new Error(`Locale ${locale} is new; --header and --body are required.`);
+    return { status: 'created' as const, localizationId: (await api.post('/v1/retentionMessageLocalizations', { data: { type: 'retentionMessageLocalizations', attributes: { locale, ...fields }, relationships: { retentionMessageVersion: rel('retentionMessageVersions', version.id) } } })).id };
+  }
+  const changes = Object.fromEntries(Object.entries(fields).filter(([key, value]) => existing.attributes[key] !== value));
+  if (!Object.keys(changes).length) return { status: 'unchanged' as const, localizationId: existing.id };
+  await api.patch(`/v1/retentionMessageLocalizations/${existing.id}`, 'retentionMessageLocalizations', existing.id, changes);
+  return { status: 'updated' as const, localizationId: existing.id, changed: Object.keys(changes) };
+}
+/** Attaches the message to the subscriptions whose cancellation flow should show it. */
+export async function attachRetentionMessage(input: { account: Account; appId: string; messageId: string; subscriptionIds: string[] }, api: ExtrasAPI & { request(method: 'PATCH', path: string, body: unknown): Promise<unknown> }) {
+  const { account, appId, messageId } = input;
+  requireWrite(account, appId);
+  const subscriptionIds = [...new Set(input.subscriptionIds)];
+  if (!subscriptionIds.length) throw new Error('Provide at least one subscription.');
+  await ownedRetentionMessage(api, appId, messageId);
+  for (const id of subscriptionIds) await ownedProduct(api, appId, 'subscription', id);
+  const attached: string[] = []; const already: string[] = [];
+  for (const id of subscriptionIds) {
+    const current = await optional(api, `/v1/subscriptions/${id}/retentionMessage`);
+    if (current?.id === messageId) { already.push(id); continue; }
+    await api.request('PATCH', `/v1/subscriptions/${id}/relationships/retentionMessage`, { data: { type: 'retentionMessages', id: messageId } });
+    attached.push(id);
+  }
+  return { messageId, attached, already };
+}
+export async function deleteRetentionMessage(input: { account: Account; appId: string; messageId: string }, api: ExtrasAPI) {
+  const { account, appId, messageId } = input;
+  requireWrite(account, appId);
+  await ownedRetentionMessage(api, appId, messageId);
+  await api.delete(`/v1/retentionMessages/${messageId}`);
+  return { removed: messageId };
+}
+/** The editable retention message version, for App Review submission. */
+export async function retentionVersionForReview(api: ExtrasAPI, appId: string, messageId: string): Promise<string> {
+  await ownedRetentionMessage(api, appId, messageId);
+  const version = await editableRetentionVersion(api, messageId, false);
+  if (!(await api.list(`/v1/retentionMessageVersions/${version.id}/localizations?limit=200`, 2000)).data.length) throw new Error('Add at least one language before submitting.');
+  return version.id;
+}

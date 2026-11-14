@@ -203,6 +203,21 @@ export function createServer(service: ConnectService, configPath?: string): McpS
     const prefix = kind === 'iap' ? 'inAppPurchaseVersions' : 'subscriptionVersions';
     return output(await service.api(account).list(`/v1/${prefix}/${versionId}/images?limit=200`, 2000));
   });
+  server.registerTool('listing_extras_get', {
+    description: 'Read an app\'s custom license agreement, accessibility declarations, App Clips, background asset packs and retention messages in one call.',
+    inputSchema: z.object({ account: z.string(), appId: idSchema }).strict(), annotations: read,
+  }, async ({ account, appId }) => {
+    const api = service.api(account);
+    const optional = async (path: string) => { try { return await api.get(path); } catch (error) { if (error instanceof Error && /HTTP 404/.test(error.message)) return null; throw error; } };
+    const [eula, accessibility, appClips, assetPacks, retentionMessages] = await Promise.all([
+      optional(`/v1/apps/${appId}/endUserLicenseAgreement`), api.list(`/v1/apps/${appId}/accessibilityDeclarations?limit=50`, 50),
+      api.list(`/v1/apps/${appId}/appClips?limit=200`, 200), api.list(`/v1/apps/${appId}/backgroundAssets?limit=200`, 200), api.list(`/v1/apps/${appId}/retentionMessages?limit=200`, 200)]);
+    return output({ eula: eula ? { id: eula.id, characters: String(eula.attributes.agreementText ?? '').length } : null, accessibility: accessibility.data, appClips: appClips.data, assetPacks: assetPacks.data, retentionMessages: retentionMessages.data });
+  });
+  server.registerTool('win_back_offers_list', {
+    description: 'List win-back offers of one subscription with dates, eligibility and priority. Each offer\'s link is https://apps.apple.com/win-back/<id>.',
+    inputSchema: z.object({ account: z.string(), subscriptionId: idSchema }).strict(), annotations: read,
+  }, async ({ account, subscriptionId }) => output(await service.api(account).list(`/v1/subscriptions/${subscriptionId}/winBackOffers?limit=200`, 2000)));
   server.registerTool('xcode_cloud_overview', {
     description: 'Show an app\'s Xcode Cloud product with its workflows (enabled or not) and the most recent build runs with their state.',
     inputSchema: z.object({ account: z.string(), appId: idSchema, recent: z.number().int().min(1).max(200).default(20) }).strict(), annotations: read,
