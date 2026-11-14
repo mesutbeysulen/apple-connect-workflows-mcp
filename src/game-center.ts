@@ -310,9 +310,16 @@ export async function setLeaderboardSetMembers(input: { account: Account; appId:
   const foreign = leaderboardIds.filter(id => !known.has(id));
   if (foreign.length) throw new Error(`Leaderboards not in this app: ${foreign.join(', ')}.`);
   const current = (await all(api, `/v2/gameCenterLeaderboardSets/${setId}/gameCenterLeaderboards?limit=200`)).map(row => row.id);
-  if (current.length === leaderboardIds.length && leaderboardIds.every(id => current.includes(id))) return { status: 'unchanged' as const, setId, leaderboards: current };
-  await api.request('PATCH', `/v2/gameCenterLeaderboardSets/${setId}/relationships/gameCenterLeaderboards`, { data: leaderboardIds.map(id => ({ type: 'gameCenterLeaderboards', id })) });
-  return { status: 'updated' as const, setId, leaderboards: leaderboardIds };
+  if (current.length === leaderboardIds.length && leaderboardIds.every((id, i) => current[i] === id)) return { status: 'unchanged' as const, setId, leaderboards: current };
+  // Apple's PATCH only reorders existing members (409 NON_EXISTING_MEMBER otherwise): add with POST, remove with DELETE, then order.
+  const linkage = (ids: string[]) => ({ data: ids.map(id => ({ type: 'gameCenterLeaderboards', id })) });
+  const path = `/v2/gameCenterLeaderboardSets/${setId}/relationships/gameCenterLeaderboards`;
+  const added = leaderboardIds.filter(id => !current.includes(id));
+  const removed = current.filter(id => !leaderboardIds.includes(id));
+  if (added.length) await api.request('POST', path, linkage(added));
+  if (removed.length) await api.request('DELETE', path, linkage(removed));
+  if (leaderboardIds.length > 1) await api.request('PATCH', path, linkage(leaderboardIds));
+  return { status: 'updated' as const, setId, leaderboards: leaderboardIds, added, removed };
 }
 /** Links a leaderboard or achievement to an activity, so finishing the activity can show it. */
 export async function linkToActivity(input: { account: Account; appId: string; kind: 'leaderboard' | 'achievement'; id: string; activityId: string | null }, api: GameCenterAPI) {

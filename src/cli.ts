@@ -319,13 +319,13 @@ const commands: Record<string, Handler> = {
   'promo-offer-create': async (v, { account }) => {
     const a = required(v, 'app', 'subscription', 'name', 'offer-code', 'offer-mode', 'duration', 'periods');
     const acc = account();
-    return extras.createPromotionalOffer({ account: acc, appId: a.app, subscriptionId: a.subscription, name: a.name, offerCode: a['offer-code'], offerMode: a['offer-mode'], duration: a.duration, numberOfPeriods: Number(a.periods), prices: extras.parsePrices(v.prices), execute: v.execute === true }, screenshotClient(acc));
+    return extras.createPromotionalOffer({ account: acc, appId: a.app, subscriptionId: a.subscription, name: a.name, offerCode: a['offer-code'], offerMode: a['offer-mode'], duration: a.duration, numberOfPeriods: Number(a.periods), prices: extras.parsePrices(v.prices), territories: v.territories ? ids(v.territories) : undefined, execute: v.execute === true }, screenshotClient(acc));
   },
   'promo-offer-delete': async (v, { account }) => { const a = required(v, 'app', 'subscription', 'offer'); const acc = account(); return extras.deletePromotionalOffer({ account: acc, appId: a.app, subscriptionId: a.subscription, offerId: a.offer }, screenshotClient(acc)); },
   'offer-code-create': async (v, { account }) => {
     const a = required(v, 'app', 'kind', 'product', 'name', 'eligibility');
     const acc = account();
-    return extras.createOfferCode({ account: acc, appId: a.app, kind: kindOf(a.kind), productId: a.product, name: a.name, eligibility: ids(a.eligibility), prices: extras.parsePrices(v.prices),
+    return extras.createOfferCode({ account: acc, appId: a.app, kind: kindOf(a.kind), productId: a.product, name: a.name, eligibility: ids(a.eligibility), prices: extras.parsePrices(v.prices), territories: v.territories ? ids(v.territories) : undefined,
       offerEligibility: v['offer-eligibility'], offerMode: v['offer-mode'], duration: v.duration, numberOfPeriods: v.periods === undefined ? undefined : Number(v.periods), execute: v.execute === true }, screenshotClient(acc));
   },
   'offer-code-activate': async (v, { account }) => { const a = required(v, 'app', 'kind', 'product', 'offer-code'); const acc = account(); return extras.setOfferCodeActive({ account: acc, appId: a.app, kind: kindOf(a.kind), productId: a.product, offerCodeId: a['offer-code'], active: true }, screenshotClient(acc)); },

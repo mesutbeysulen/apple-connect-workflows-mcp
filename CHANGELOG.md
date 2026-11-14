@@ -2,6 +2,21 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/); while the version is below 1.0, a minor release may contain breaking changes, which are marked **Breaking**.
 
+## 0.16.0 — 2026-11-14
+
+### Fixed
+Found by running commerce, Game Center and certificate writes against a live account:
+- `product-localize --iap` failed: Apple now keeps in-app purchase text on versions. The command writes to the purchase's draft version, creating it if needed.
+- `iap-price-set` and `app-price-set` failed: Apple rejects an included territory resource. The base territory is now sent only as a relationship.
+- `promo-offer-create` and subscription `offer-code-create` failed for free trials: Apple needs a territory-only price entry per territory. They default to every territory where the subscription is sold; `--territories` narrows it.
+- `subscription-price-set` now says to run `product-availability-set` first when the subscription is not sold in that territory, instead of Apple's 409 UNSUPPORTED_TERRITORY.
+- `gc-set-members` failed for new members: Apple's PATCH only reorders. It now adds with POST, removes with DELETE, then orders.
+- `winback-create` and `winback-update` check `--wait-months` is 2-24 before sending.
+- Help now shows the different eligibility values for in-app purchase and subscription offer codes, and that subscription codes need `--offer-eligibility`.
+
+### Verified live
+In-app purchases, subscriptions, prices, availability, review screenshots, promoted purchases, introductory, promotional and offer-code offers, retention messages, Game Center leaderboards, achievements, sets and images, and certificate creation and revocation. Win-back offers need an approved subscription, so Apple's refusal was the expected result.
+
 ## 0.15.1 — 2026-11-14
 
 ### Verified live

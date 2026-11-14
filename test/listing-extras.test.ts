@@ -147,6 +147,9 @@ test('win-back offers follow Apple\'s documented request and validate eligibilit
   assert.deepEqual(body.data.relationships.prices.data.map((p: any) => p.id), body.included.map((p: any) => p.id));
   assert.equal((await x.createWinBackOffer({ ...winBack, offerId: 'old_offer', execute: true }, f.api) as { status?: string }).status, 'exists');
   await assert.rejects(x.createWinBackOffer({ ...winBack, offerMode: 'FREE_TRIAL' }, f.api), /PAY_AS_YOU_GO and PAY_UP_FRONT/);
+  // Apple accepts 2-24 months between win-back offers.
+  await assert.rejects(x.createWinBackOffer({ ...winBack, waitMonths: 1 }, f.api), /--wait-months must be 2-24/);
+  await assert.rejects(x.updateWinBackOffer({ ...base, subscriptionId: 'sub1', offerId: 'x', waitMonths: 25 }, f.api), /--wait-months must be 2-24/);
   await assert.rejects(x.createWinBackOffer({ ...winBack, lapsedMin: 30 }, f.api), /cannot exceed/);
   await assert.rejects(x.createWinBackOffer({ ...winBack, endDate: '2026-12-01' }, f.api), /end after the start/);
   await assert.rejects(x.createWinBackOffer({ ...winBack, prices: [] }, f.api), /need --prices/);

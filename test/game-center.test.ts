@@ -148,7 +148,16 @@ test('submitting sends the version to App Review; activities and challenges get 
 test('sets, activity links, default leaderboard, groups and matchmaking', async () => {
   const f = game();
   assert.equal((await gc.setLeaderboardSetMembers({ ...base, setId: 'set', leaderboardIds: ['lb', 'lb'] }, f.api)).status, 'updated');
-  assert.deepEqual(f.writes()[0]!.body, { data: [{ type: 'gameCenterLeaderboards', id: 'lb' }] });
+  // Apple's PATCH only reorders members; a new member is added with POST first.
+  assert.deepEqual([f.writes()[0]!.method, f.writes()[0]!.body], ['POST', { data: [{ type: 'gameCenterLeaderboards', id: 'lb' }] }]);
+  assert.equal(f.writes().length, 1);
+  const members = game({ '/v1/gameCenterDetails/gcd/gameCenterLeaderboards': [res('lb', 'gameCenterLeaderboards'), res('lb2', 'gameCenterLeaderboards'), res('lb3', 'gameCenterLeaderboards')],
+    '/v2/gameCenterLeaderboardSets/set/gameCenterLeaderboards': [res('lb', 'gameCenterLeaderboards'), res('lb2', 'gameCenterLeaderboards')] });
+  const changed = await gc.setLeaderboardSetMembers({ ...base, setId: 'set', leaderboardIds: ['lb3', 'lb'] }, members.api);
+  assert.deepEqual([changed.added, changed.removed], [['lb3'], ['lb2']]);
+  assert.deepEqual(members.writes().map(w => w.method), ['POST', 'DELETE', 'PATCH']);
+  assert.deepEqual((members.writes()[2]!.body as any).data.map((d: any) => d.id), ['lb3', 'lb']);
+  assert.equal((await gc.setLeaderboardSetMembers({ ...base, setId: 'set', leaderboardIds: ['lb', 'lb2'] }, members.api)).status, 'unchanged');
   await assert.rejects(gc.setLeaderboardSetMembers({ ...base, setId: 'set', leaderboardIds: ['zz'] }, f.api), /not in this app: zz/);
   await gc.linkToActivity({ ...base, kind: 'achievement', id: 'ach', activityId: 'act' }, f.api);
   assert.equal(f.writes().at(-1)!.path, '/v2/gameCenterAchievements/ach/relationships/activity');

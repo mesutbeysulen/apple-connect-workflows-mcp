@@ -130,19 +130,20 @@ export async function localizeProduct(input: { account: Account; appId: string; 
   const { account, appId, kind, productId, locale, name, description } = input;
   requireWrite(account, appId);
   if (!validId(productId) || !/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(locale) || !name) throw new Error('Use a valid product ID, locale and name.');
-  if (kind === 'iap') { if (!(await appIaps(api, appId)).some(row => row.id === productId)) throw new Error('In-app purchase does not belong to this app.'); }
-  else await appSubscription(api, appId, productId);
-  const listing = kind === 'iap' ? `/v2/inAppPurchases/${productId}/inAppPurchaseLocalizations?limit=200` : `/v1/subscriptions/${productId}/subscriptionLocalizations?limit=200`;
-  const resource = kind === 'iap' ? 'inAppPurchaseLocalizations' : 'subscriptionLocalizations';
-  const prefix = kind === 'iap' ? '/v2' : '/v1';
-  const found = (await api.list(listing, 200)).data.find(row => row.attributes.locale === locale);
+  if (kind === 'iap') {
+    // Apple moved in-app purchase text to versions: localizations now need a version, not the purchase (409 otherwise).
+    const version = await createProductVersion({ account, appId, kind: 'iap', productId }, api);
+    return localizeProductVersion({ account, appId, kind: 'iap', productId, versionId: version.id, locale, name, description }, api);
+  }
+  await appSubscription(api, appId, productId);
+  const resource = 'subscriptionLocalizations';
+  const found = (await api.list(`/v1/subscriptions/${productId}/subscriptionLocalizations?limit=200`, 200)).data.find(row => row.attributes.locale === locale);
   if (found) {
     if (found.attributes.name === name && (description === undefined || found.attributes.description === description)) return { status: 'unchanged', id: found.id };
-    await api.patch(`${prefix}/${resource}/${found.id}`, resource, found.id, { name, ...(description === undefined ? {} : { description }) });
+    await api.patch(`/v1/${resource}/${found.id}`, resource, found.id, { name, ...(description === undefined ? {} : { description }) });
     return { status: 'updated', id: found.id };
   }
-  const relationships = kind === 'iap' ? { inAppPurchaseV2: rel('inAppPurchases', productId) } : { subscription: rel('subscriptions', productId) };
-  const created = await api.post(`${prefix}/${resource}`, { data: { type: resource, attributes: { name, locale, ...(description === undefined ? {} : { description }) }, relationships } });
+  const created = await api.post(`/v1/${resource}`, { data: { type: resource, attributes: { name, locale, ...(description === undefined ? {} : { description }) }, relationships: { subscription: rel('subscriptions', productId) } } });
   return { status: 'created', id: created.id };
 }
 export interface CurrentPrice { id: string; manual?: unknown; startDate: unknown; endDate: unknown; territory?: string; pricePointId?: string }
@@ -178,7 +179,7 @@ export async function setAppPrice(input: { account: Account; appId: string; terr
   const preview: PricePreview = { dryRun: !execute, target: `app ${appId}`, territory, price, pricePointId: id, startDate: startDate ?? null, effect: 'Replaces the full manual price schedule listed under current; other territories follow Apple equalization.', ...await currentSchedule(api, `/v1/apps/${appId}/appPriceSchedule`, 'appPriceSchedules', 'appPricePoint') };
   if (!execute) return preview;
   const created = await api.post('/v1/appPriceSchedules', { data: { type: 'appPriceSchedules', relationships: { app: rel('apps', appId), baseTerritory: rel('territories', territory), manualPrices: { data: [{ type: 'appPrices', id: '${price}' }] } } },
-    included: [{ type: 'appPrices', id: '${price}', attributes: { startDate: startDate ?? null, endDate: null }, relationships: { appPricePoint: rel('appPricePoints', id) } }, { type: 'territories', id: territory }] });
+    included: [{ type: 'appPrices', id: '${price}', attributes: { startDate: startDate ?? null, endDate: null }, relationships: { appPricePoint: rel('appPricePoints', id) } }] });
   return { ...preview, result: created.id, status: 'created' };
 }
 export async function setIapPrice(input: { account: Account; appId: string; iapId: string; territory: string; price: string; startDate?: string; execute?: boolean }, api: CommercialAPI): Promise<PricePreview> {
@@ -190,8 +191,17 @@ export async function setIapPrice(input: { account: Account; appId: string; iapI
   const preview: PricePreview = { dryRun: !execute, target: `iap ${iapId}`, territory, price, pricePointId: id, startDate: startDate ?? null, effect: 'Replaces the full manual price schedule listed under current.', ...await currentSchedule(api, `/v2/inAppPurchases/${iapId}/iapPriceSchedule`, 'inAppPurchasePriceSchedules', 'inAppPurchasePricePoint') };
   if (!execute) return preview;
   const created = await api.post('/v1/inAppPurchasePriceSchedules', { data: { type: 'inAppPurchasePriceSchedules', relationships: { inAppPurchase: rel('inAppPurchases', iapId), baseTerritory: rel('territories', territory), manualPrices: { data: [{ type: 'inAppPurchasePrices', id: '${price}' }] } } },
-    included: [{ type: 'inAppPurchasePrices', id: '${price}', attributes: { startDate: startDate ?? null, endDate: null }, relationships: { inAppPurchaseV2: rel('inAppPurchases', iapId), inAppPurchasePricePoint: rel('inAppPurchasePricePoints', id) } }, { type: 'territories', id: territory }] });
+    included: [{ type: 'inAppPurchasePrices', id: '${price}', attributes: { startDate: startDate ?? null, endDate: null }, relationships: { inAppPurchaseV2: rel('inAppPurchases', iapId), inAppPurchasePricePoint: rel('inAppPurchasePricePoints', id) } }] });
   return { ...preview, result: created.id, status: 'created' };
+}
+/** Territories where a subscription is sold; empty when availability was never set. */
+export async function subscriptionTerritories(api: CommercialAPI, subscriptionId: string): Promise<string[]> {
+  try {
+    const availability = await api.get(`/v1/subscriptions/${subscriptionId}/subscriptionAvailability`);
+    if (!availability?.id) return [];
+    const rows = await api.list(`/v1/subscriptionAvailabilities/${availability.id}/availableTerritories?limit=200`, 2000);
+    return rows.data.map(row => row.id);
+  } catch (error) { if (error instanceof AppleError && error.status === 404) return []; throw error; }
 }
 export async function setSubscriptionPrice(input: { account: Account; appId: string; subscriptionId: string; territory: string; price: string; startDate?: string; preserveCurrentPrice?: boolean; execute?: boolean }, api: CommercialAPI): Promise<PricePreview> {
   const { account, appId, subscriptionId, territory, price, startDate, preserveCurrentPrice = false, execute = false } = input;
@@ -199,6 +209,8 @@ export async function setSubscriptionPrice(input: { account: Account; appId: str
   if (!validId(subscriptionId) || !validDate(startDate)) throw new Error('Use a valid subscription ID and YYYY-MM-DD start date.');
   await appSubscription(api, appId, subscriptionId);
   const id = await pricePoint(api, `/v1/subscriptions/${subscriptionId}/pricePoints`, territory, price);
+  // Apple answers 409 UNSUPPORTED_TERRITORY when the subscription is not sold there yet.
+  if (execute && !(await subscriptionTerritories(api, subscriptionId)).includes(territory)) throw new Error(`Subscription ${subscriptionId} is not available in ${territory}. Run product-availability-set --kind subscription first.`);
   const existing = await api.list(`/v1/subscriptions/${subscriptionId}/prices?${new URLSearchParams({ 'filter[territory]': territory, include: 'territory,subscriptionPricePoint', limit: '200' })}`, 2000);
   const current = existing.data.map(row => toPrice(row, 'subscriptionPricePoint'));
   const preview: PricePreview = { dryRun: !execute, target: `subscription ${subscriptionId}`, territory, price, pricePointId: id, startDate: startDate ?? null, current, currentIncomplete: existing.truncated,

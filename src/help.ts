@@ -94,10 +94,12 @@ export const TOPICS: HelpTopic[] = [
   intro-offer-delete --account NAME --app ID --subscription ID --offer ID
   product-availability-set --account NAME --app ID --kind iap|subscription --product ID (--territories USA,TUR | --all) [--new-territories] [--execute]
   promo-offer-create --account NAME --app ID --subscription ID --name TEXT --offer-code ID --offer-mode MODE --duration ONE_MONTH --periods 1
-                     [--prices USA=0.99,TUR=29.99] [--execute]
+                     [--prices USA=0.99,TUR=29.99 | --territories USA,TUR for FREE_TRIAL] [--execute]
   promo-offer-delete --account NAME --app ID --subscription ID --offer ID
-  offer-code-create --account NAME --app ID --kind iap|subscription --product ID --name TEXT --eligibility NEW,EXPIRED
-                    [--offer-eligibility STACK_WITH_INTRO_OFFERS|REPLACE_INTRO_OFFERS --offer-mode MODE --duration D --periods N] [--prices USA=0.99] [--execute]
+  offer-code-create --account NAME --app ID --kind iap --product ID --name TEXT --eligibility NON_SPENDER,ACTIVE_SPENDER,CHURNED_SPENDER --prices USA=0.99 [--execute]
+  offer-code-create --account NAME --app ID --kind subscription --product ID --name TEXT --eligibility NEW,EXISTING,EXPIRED
+                    --offer-eligibility STACK_WITH_INTRO_OFFERS|REPLACE_INTRO_OFFERS --offer-mode MODE --duration D --periods N
+                    [--prices USA=0.99 | --territories USA,TUR for FREE_TRIAL] [--execute]
   offer-code-activate|offer-code-deactivate --account NAME --app ID --kind iap|subscription --product ID --offer-code ID
   offer-codes-generate --account NAME --app ID --kind iap|subscription --product ID --offer-code ID --count 100 --expires YYYY-MM-DD
                        [--environment PRODUCTION|SANDBOX] --out /absolute/codes.csv [--execute]
@@ -113,7 +115,7 @@ export const TOPICS: HelpTopic[] = [
                          [--start-date YYYY-MM-DD] [--preserve-current-price] [--execute]` },
   { id: 'retention', title: 'Win-back and retention', summary: 'Win-back offers and retention messages for subscriptions.',
     commands: `  winback-create --account NAME --app ID --subscription ID --name TEXT --offer ID --offer-mode PAY_AS_YOU_GO|PAY_UP_FRONT --duration ONE_MONTH --periods 1
-                 --paid-months 6 --lapsed-min 2 --lapsed-max 24 [--wait-months 2] --start-date YYYY-MM-DD [--end-date YYYY-MM-DD]
+                 --paid-months 6 --lapsed-min 2 --lapsed-max 24 [--wait-months 2-24] --start-date YYYY-MM-DD [--end-date YYYY-MM-DD]
                  --priority HIGH|NORMAL [--promote true|false] --prices USA=4.99,TUR=99.99 [--execute]
   winback-update --account NAME --app ID --subscription ID --offer ID [--start-date D] [--end-date D] [--priority P] [--promote B] [--paid-months N] [--wait-months N]
   winback-delete --account NAME --app ID --subscription ID --offer ID

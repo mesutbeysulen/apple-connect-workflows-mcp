@@ -19,6 +19,10 @@ const shop = (over = {}) => ({
   '/v1/apps/123/appPricePoints': [res('app-499', 'appPricePoints', { customerPrice: '4.99' }), res('app-599', 'appPricePoints', { customerPrice: '5.99' })],
   '/v2/inAppPurchases/iap1/pricePoints': [res('iap-199', 'inAppPurchasePricePoints', { customerPrice: '1.99' })],
   '/v1/subscriptions/sub1/pricePoints': [res('sub-999', 'subscriptionPricePoints', { customerPrice: '9.99' })],
+  '/v1/subscriptions/sub1/subscriptionAvailability': res('av', 'subscriptionAvailabilities'),
+  '/v1/subscriptionAvailabilities/av/availableTerritories': [res('USA', 'territories')],
+  '/v2/inAppPurchases/iap1/versions': [res('iv', 'inAppPurchaseVersions', { state: 'PREPARE_FOR_SUBMISSION' })],
+  '/v1/inAppPurchaseVersions/iv/localizations': [res('l1', 'inAppPurchaseLocalizations', { locale: 'tr', name: 'Altın', description: 'd' })],
   ...over,
 }) as never;
 test('product creation is idempotent and validated', async () => {
@@ -39,10 +43,13 @@ test('localization creates, updates or leaves unchanged', async () => {
   const base = { account, appId: '123', kind: 'iap' as const, productId: 'iap1', locale: 'tr' };
   assert.equal((await localizeProduct({ ...base, name: 'Altın' }, f.api)).status, 'unchanged');
   assert.equal(f.writes().length, 0);
+  // In-app purchase text lives on the draft version now; a localization without a version is rejected by Apple.
   assert.equal((await localizeProduct({ ...base, name: 'Para' }, f.api)).status, 'updated');
   assert.equal(f.writes()[0]!.path, '/v2/inAppPurchaseLocalizations/l1');
+  assert.equal((await localizeProduct({ ...base, locale: 'en-US', name: 'Coins' }, f.api)).status, 'created');
+  assert.equal((f.writes()[1]!.body as any).data.relationships.version.data.id, 'iv');
   assert.equal((await localizeProduct({ account, appId: '123', kind: 'subscription', productId: 'sub1', locale: 'en-US', name: 'Pro' }, f.api)).status, 'created');
-  assert.equal(f.writes()[1]!.path, '/v1/subscriptionLocalizations');
+  assert.equal(f.writes()[2]!.path, '/v1/subscriptionLocalizations');
   await assert.rejects(localizeProduct({ ...base, productId: 'stranger', name: 'x' }, f.api), /does not belong/);
 });
 test('product metadata versions are app-owned, idempotent and localized with v2 relationships', async () => {
@@ -85,6 +92,9 @@ test('prices preview by default, match exactly and write only with execute', asy
   const sub = f.writes()[2]!.body as any;
   assert.equal(sub.data.attributes.preserveCurrentPrice, true);
   assert.equal(sub.data.relationships.subscriptionPricePoint.data.id, 'sub-999');
+  // Apple rejects an included territory resource; the base territory is a plain relationship.
+  assert(!JSON.stringify(f.writes().map(w => (w.body as any).included ?? [])).includes('"territories"'));
+  await assert.rejects(setSubscriptionPrice({ account, appId: '123', subscriptionId: 'sub1', territory: 'TUR', price: '9.99', execute: true }, f.api), /not available in TUR.*product-availability-set/);
   await assert.rejects(setIapPrice({ account, appId: '123', iapId: 'stranger', territory: 'USA', price: '1.99' }, f.api), /does not belong/);
   await assert.rejects(setAppPrice({ account, appId: '123', territory: 'usa', price: '1' }, f.api), /territory/);
 });

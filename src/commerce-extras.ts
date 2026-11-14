@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { requireAccountWrite, requireWrite, type Account } from './config.js';
 import { AppleError, type Resource } from './apple.js';
 import { validId } from './apple-rules.js';
-import { appIaps, appSubscription, pricePoint, type CommercialAPI } from './commercial.js';
+import { appIaps, appSubscription, pricePoint, subscriptionTerritories, type CommercialAPI } from './commercial.js';
 import { OFFER_DURATIONS, OFFER_MODES } from './offers.js';
 import { readImage } from './screenshots.js';
 import { putFilePart, validateOperations } from './upload-transfer.js';
@@ -126,17 +126,31 @@ function checkTerms(terms: SubscriptionOfferTerms): void {
   // Paid modes need a price per territory; a free trial carries none, so a forgotten price never turns into a free offer.
   if ((terms.offerMode === 'FREE_TRIAL') !== !terms.prices.length) throw new Error(terms.offerMode === 'FREE_TRIAL' ? 'A free trial takes no --prices.' : 'Paid offers need --prices, e.g. USA=0.99,TUR=29.99.');
 }
-const inlinePrices = (type: string, pointType: string, pointRelation: string, prices: { territory: string; pricePointId: string }[]) => prices.map((p, i) => ({
-  type, id: `\${price${i}}`, relationships: { territory: rel('territories', p.territory), [pointRelation]: rel(pointType, p.pricePointId) } }));
+const inlinePrices = (type: string, pointType: string, pointRelation: string, prices: { territory: string; pricePointId?: string }[]) => prices.map((p, i) => ({
+  type, id: `\${price${i}}`, relationships: { territory: rel('territories', p.territory), ...(p.pricePointId ? { [pointRelation]: rel(pointType, p.pricePointId) } : {}) } }));
+/**
+ * Apple needs one price entry per territory even for a free trial (409 RELATIONSHIP.REQUIRED otherwise);
+ * free entries carry only the territory. Defaults to every territory where the subscription is sold.
+ */
+async function offerPrices(api: ExtrasAPI, subscriptionId: string, terms: SubscriptionOfferTerms, territories: string[] | undefined): Promise<{ territory: string; price?: string; pricePointId?: string }[]> {
+  if (terms.offerMode !== 'FREE_TRIAL') {
+    if (territories?.length) throw new Error('--territories applies only to free trials; paid offers take --prices.');
+    return resolvePrices(api, 'subscription', subscriptionId, terms.prices);
+  }
+  const list = territories?.length ? territories : await subscriptionTerritories(api, subscriptionId);
+  if (!list.length) throw new Error('The subscription is not sold anywhere yet. Run product-availability-set first, or pass --territories.');
+  if (!list.every(t => /^[A-Z]{3}$/.test(t))) throw new Error('Territories are three-letter codes such as USA,TUR.');
+  return list.map(territory => ({ territory }));
+}
 
-export async function createPromotionalOffer(input: { account: Account; appId: string; subscriptionId: string; name: string; offerCode: string; execute?: boolean } & SubscriptionOfferTerms, api: ExtrasAPI) {
-  const { account, appId, subscriptionId, name, offerCode, execute = false, ...terms } = input;
+export async function createPromotionalOffer(input: { account: Account; appId: string; subscriptionId: string; name: string; offerCode: string; territories?: string[]; execute?: boolean } & SubscriptionOfferTerms, api: ExtrasAPI) {
+  const { account, appId, subscriptionId, name, offerCode, territories, execute = false, ...terms } = input;
   if (execute) requireWrite(account, appId);
   checkTerms(terms);
   if (!name || [...name].length > 64) throw new Error('Name must be 1-64 characters.');
   if (!/^[A-Za-z0-9._-]{1,64}$/.test(offerCode)) throw new Error('Offer code identifier may use letters, digits, dot, dash and underscore (1-64).');
   await ownedProduct(api, appId, 'subscription', subscriptionId);
-  const prices = await resolvePrices(api, 'subscription', subscriptionId, terms.prices);
+  const prices = await offerPrices(api, subscriptionId, terms, territories);
   const existing = (await api.list(`/v1/subscriptions/${subscriptionId}/promotionalOffers?limit=200`, 2000)).data.find(row => row.attributes.offerCode === offerCode);
   const preview = { dryRun: !execute, subscriptionId, name, offerCode, offerMode: terms.offerMode, duration: terms.duration, numberOfPeriods: terms.numberOfPeriods, prices };
   if (existing) return { ...preview, status: 'exists' as const, offerId: existing.id };
@@ -163,7 +177,7 @@ const OFFER_ELIGIBILITY = ['STACK_WITH_INTRO_OFFERS', 'REPLACE_INTRO_OFFERS'];
 const CODE_RESOURCE = { iap: 'inAppPurchaseOfferCodes', subscription: 'subscriptionOfferCodes' } as const;
 export interface OfferCodeInput {
   account: Account; appId: string; kind: ProductKind; productId: string; name: string; eligibility: string[];
-  prices: { territory: string; price: string }[]; offerEligibility?: string; offerMode?: string; duration?: string; numberOfPeriods?: number; execute?: boolean;
+  prices: { territory: string; price: string }[]; territories?: string[]; offerEligibility?: string; offerMode?: string; duration?: string; numberOfPeriods?: number; execute?: boolean;
 }
 /** Creates an offer code campaign. Codes themselves are generated separately with offer-codes-generate. */
 export async function createOfferCode(input: OfferCodeInput, api: ExtrasAPI) {
@@ -180,7 +194,9 @@ export async function createOfferCode(input: OfferCodeInput, api: ExtrasAPI) {
     if (!input.prices.length) throw new Error('In-app purchase offer codes need --prices.');
   }
   await ownedProduct(api, appId, kind, productId);
-  const prices = await resolvePrices(api, kind, productId, input.prices);
+  const prices = kind === 'subscription'
+    ? await offerPrices(api, productId, { offerMode: input.offerMode ?? '', duration: input.duration ?? '', numberOfPeriods: input.numberOfPeriods ?? 0, prices: input.prices }, input.territories)
+    : await resolvePrices(api, kind, productId, input.prices);
   const existing = (await api.list(`${PRODUCT[kind].base}/${productId}/offerCodes?limit=200`, 2000)).data.find(row => row.attributes.name === name);
   const terms = kind === 'subscription' ? { offerEligibility: input.offerEligibility, offerMode: input.offerMode, duration: input.duration, numberOfPeriods: input.numberOfPeriods } : {};
   const preview = { dryRun: !execute, kind, productId, name, eligibility, ...terms, prices };
@@ -328,6 +344,7 @@ export async function createWinBackOffer(input: WinBackInput, api: ExtrasAPI) {
   if (!OFFER_DURATIONS.includes(duration)) throw new Error(`Duration must be one of ${OFFER_DURATIONS.join(', ')}.`);
   if (!Number.isInteger(periodCount) || periodCount < 1) throw new Error('Period count must be a whole number of at least 1.');
   for (const months of [paidMonths, lapsedMin, lapsedMax, ...(waitMonths === undefined ? [] : [waitMonths])]) if (!Number.isInteger(months) || months < 0) throw new Error('Eligibility months must be whole numbers.');
+  checkWaitMonths(waitMonths);
   if (lapsedMin > lapsedMax) throw new Error('Lapsed-months minimum cannot exceed its maximum.');
   if (!isDate(startDate) || !isDate(endDate) || (endDate !== undefined && endDate <= startDate)) throw new Error('Dates must be YYYY-MM-DD, with the end after the start.');
   if (!['HIGH', 'NORMAL'].includes(priority)) throw new Error('Priority must be HIGH or NORMAL.');
@@ -348,11 +365,16 @@ export async function createWinBackOffer(input: WinBackInput, api: ExtrasAPI) {
   return { ...preview, status: 'created' as const, offerId: created.id, url: `https://apps.apple.com/win-back/${created.id}` };
 }
 /** Dates, eligibility and priority can change; after an offer is live Apple allows only the priority. */
+/** Apple accepts 2-24 months between win-back offers (409 ATTRIBUTE.INVALID otherwise). */
+function checkWaitMonths(waitMonths: number | undefined): void {
+  if (waitMonths !== undefined && (!Number.isInteger(waitMonths) || waitMonths < 2 || waitMonths > 24)) throw new Error('--wait-months must be 2-24.');
+}
 export async function updateWinBackOffer(input: { account: Account; appId: string; subscriptionId: string; offerId: string; startDate?: string; endDate?: string; priority?: string; promoted?: boolean; paidMonths?: number; waitMonths?: number }, api: ExtrasAPI) {
   const { account, appId, subscriptionId, offerId } = input;
   requireWrite(account, appId);
   if (!isDate(input.startDate) || !isDate(input.endDate)) throw new Error('Dates must be YYYY-MM-DD.');
   if (input.priority !== undefined && !['HIGH', 'NORMAL'].includes(input.priority)) throw new Error('Priority must be HIGH or NORMAL.');
+  checkWaitMonths(input.waitMonths);
   await ownedProduct(api, appId, 'subscription', subscriptionId);
   const offer = (await api.list(`/v1/subscriptions/${subscriptionId}/winBackOffers?limit=200`, 2000)).data.find(row => row.id === offerId);
   if (!offer) throw new Error('Win-back offer does not belong to this subscription.');

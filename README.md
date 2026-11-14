@@ -21,19 +21,19 @@ https://github.com/mesutbeysulen/apple-connect-workflows-mcp — install this MC
 Node.js 24 or newer. Pass the path to your `.p8` key, never its contents:
 
 ```sh
-npx -y apple-connect-workflows-mcp@0.15.1 key-setup \
+npx -y apple-connect-workflows-mcp@0.16.0 key-setup \
   --config "$HOME/.apple-connect-mcp/config.json" \
   --name main --issuer YOUR_ISSUER_UUID \
   --p8 /absolute/path/AuthKey_ABCDEFGHIJ.p8
 
-npx -y apple-connect-workflows-mcp@0.15.1 doctor --config "$HOME/.apple-connect-mcp/config.json"
+npx -y apple-connect-workflows-mcp@0.16.0 doctor --config "$HOME/.apple-connect-mcp/config.json"
 ```
 
 Register it with Claude Code (for Codex CLI, use `codex mcp add` with the same arguments):
 
 ```sh
 claude mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.15.1 serve
+  npx -y apple-connect-workflows-mcp@0.16.0 serve
 ```
 
 For individual keys, other clients, source installs and enabling writes, see [Getting started](docs/getting-started.md).
@@ -78,7 +78,7 @@ Details and limits are in the [safety model](docs/safety.md).
 
 ## Status
 
-Every request the commands send is checked in tests against Apple's App Store Connect API 4.6 OpenAPI schema, and the MCP server is tested over a real stdio session. Read tools have been run against a live account with `smoke-read` (67 of 71 returned real data, none failed), and the core release-preparation writes (text, metadata sync, App Review and TestFlight details, beta groups, build attachment, screenshot upload, and the MCP plan-and-apply path), Custom Product Pages, in-app events, webhooks, sandbox testers, App IDs, capabilities, provisioning profiles and A/B test setup. Commerce, Game Center, certificates, team, submission and release writes are not yet verified live; see the [safety model](docs/safety.md#what-has-and-has-not-been-verified). Run `smoke-read` on your account, then try writes on a test app.
+Every request the commands send is checked in tests against Apple's App Store Connect API 4.6 OpenAPI schema, and the MCP server is tested over a real stdio session. Read tools have been run against a live account with `smoke-read` (67 of 71 returned real data, none failed), and the core release-preparation writes (text, metadata sync, App Review and TestFlight details, beta groups, build attachment, screenshot upload, and the MCP plan-and-apply path), Custom Product Pages, in-app events, webhooks, sandbox testers, App IDs, capabilities, provisioning profiles, certificates, A/B test setup, in-app purchases, subscriptions, offers and Game Center items. Submission, release, team and Xcode Cloud writes are not yet verified live; see the [safety model](docs/safety.md#what-has-and-has-not-been-verified). Run `smoke-read` on your account, then try writes on a test app.
 
 Not covered: creating the app record, App Privacy answers and agreements (no API; `submission_manual_steps` links to them), Keychain storage of keys, and remote multi-user hosting.
 

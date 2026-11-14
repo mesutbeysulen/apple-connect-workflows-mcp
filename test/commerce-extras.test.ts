@@ -63,12 +63,19 @@ test('promotional offers resolve territory prices, refuse a free trial with pric
   await assert.rejects(x.deletePromotionalOffer({ ...base, subscriptionId: 'sub1', offerId: 'nope' }, exists.api), /does not belong/);
 });
 test('offer codes validate per product kind and build valid requests', async () => {
-  const f = shop({ '/v1/subscriptions/sub1/offerCodes': [], '/v2/inAppPurchases/iap1/offerCodes': [] });
+  const sold = { '/v1/subscriptions/sub1/subscriptionAvailability': res('av', 'subscriptionAvailabilities'), '/v1/subscriptionAvailabilities/av/availableTerritories': [res('USA', 'territories'), res('TUR', 'territories')] };
+  const f = shop({ '/v1/subscriptions/sub1/offerCodes': [], '/v2/inAppPurchases/iap1/offerCodes': [], ...sold });
   const sub = { ...base, kind: 'subscription' as const, productId: 'sub1', name: 'Spring', eligibility: ['NEW', 'EXPIRED'], offerEligibility: 'STACK_WITH_INTRO_OFFERS', offerMode: 'FREE_TRIAL', duration: 'ONE_MONTH', numberOfPeriods: 1, prices: [], execute: true };
   assert.equal((await x.createOfferCode(sub, f.api) as { status?: string }).status, 'created');
+  // Apple needs a territory-only price entry per territory for a free trial; it defaults to where the subscription is sold.
+  const trial = f.writes()[0]!.body as any;
+  assert.deepEqual(trial.included.map((p: any) => [p.relationships.territory.data.id, p.relationships.subscriptionPricePoint]), [['USA', undefined], ['TUR', undefined]]);
+  assert.equal((await x.createOfferCode({ ...sub, name: 'Only US', territories: ['USA'] }, f.api) as { prices?: unknown[] }).prices!.length, 1);
+  const unsold = shop({ '/v1/subscriptions/sub1/offerCodes': [] });
+  await assert.rejects(x.createOfferCode(sub, unsold.api), /not sold anywhere yet/);
   const iap = { ...base, kind: 'iap' as const, productId: 'iap1', name: 'Coins', eligibility: ['NON_SPENDER'], prices: x.parsePrices('USA=0.99'), execute: true };
   await x.createOfferCode(iap, f.api);
-  assert.equal((f.writes()[1]!.body as any).included[0].relationships.pricePoint.data.id, 'i-usa');
+  assert.equal((f.writes()[2]!.body as any).included[0].relationships.pricePoint.data.id, 'i-usa');
   await assert.rejects(x.createOfferCode({ ...iap, eligibility: ['NEW'] }, f.api), /Eligibility must use NON_SPENDER/);
   await assert.rejects(x.createOfferCode({ ...iap, offerMode: 'FREE_TRIAL' }, f.api), /apply only to subscriptions/);
   await assert.rejects(x.createOfferCode({ ...sub, offerEligibility: undefined }, f.api), /--offer-eligibility/);
