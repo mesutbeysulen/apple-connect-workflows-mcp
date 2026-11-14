@@ -9,6 +9,7 @@ import { assetLibraryId } from './asset-library.js';
 import { PLACEMENT_GROUP_PATTERN } from './apple-rules.js';
 import { cleanupStaleAssets } from './asset-cleanup.js';
 import { buildStatus } from './build-status.js';
+import { buildRunSummary, cloudProduct } from './xcode-cloud.js';
 import { creativeOverview } from './creative-assets.js';
 import { releaseReadiness, manualCheckIds } from './release.js';
 import { assertReadablePath, matchEndpoint, redactSecrets, searchCatalog } from './catalog.js';
@@ -202,6 +203,19 @@ export function createServer(service: ConnectService, configPath?: string): McpS
     const prefix = kind === 'iap' ? 'inAppPurchaseVersions' : 'subscriptionVersions';
     return output(await service.api(account).list(`/v1/${prefix}/${versionId}/images?limit=200`, 2000));
   });
+  server.registerTool('xcode_cloud_overview', {
+    description: 'Show an app\'s Xcode Cloud product with its workflows (enabled or not) and the most recent build runs with their state.',
+    inputSchema: z.object({ account: z.string(), appId: idSchema, recent: z.number().int().min(1).max(200).default(20) }).strict(), annotations: read,
+  }, async ({ account, appId, recent }) => {
+    const api = service.api(account);
+    const product = await cloudProduct(api, appId);
+    const [workflows, runs] = await Promise.all([api.list(`/v1/ciProducts/${product.id}/workflows?limit=200`, 2000), api.list(`/v1/ciProducts/${product.id}/buildRuns?sort=-number&limit=${recent}`, recent)]);
+    return output({ product, workflows: workflows.data, recentBuildRuns: runs.data });
+  });
+  server.registerTool('xcode_cloud_build_run', {
+    description: 'Read one Xcode Cloud build run with each action\'s result and, for failed actions, the reported issues and failing tests.',
+    inputSchema: z.object({ account: z.string(), buildRunId: idSchema }).strict(), annotations: read,
+  }, async ({ account, buildRunId }) => output(await buildRunSummary(service.api(account), buildRunId)));
   server.registerTool('game_center_overview', {
     description: 'Show whether Game Center is enabled for an app and list its leaderboards, leaderboard sets, achievements (with points used of 1000), activities and challenges. Use game_center_versions for one item\'s versions and languages.',
     inputSchema: z.object({ account: z.string(), appId: idSchema }).strict(), annotations: read,
