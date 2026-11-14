@@ -122,7 +122,7 @@ export const TOPICS: HelpTopic[] = [
   retention-attach --account NAME --app ID --message ID --subscriptions ID1,ID2
   retention-submit --account NAME --app ID --message ID
   retention-delete --account NAME --app ID --message ID` },
-  { id: 'marketing', title: 'Marketing', summary: 'Custom Product Pages, in-app events and product page A/B tests.', note: "Custom Product Pages, in-app events, product page A/B tests",
+  { id: 'marketing', title: 'Marketing', summary: 'Custom Product Pages, in-app events and product page A/B tests.', note: "A/B tests need an app that is live on the App Store; Apple keeps a deleted page's name reserved for a while",
     commands: `  cpp-create --account NAME --app ID --name TEXT [--deep-link URL]
   cpp-update --account NAME --app ID --page ID [--name TEXT] [--visible true|false]
   cpp-delete --account NAME --app ID --page ID
@@ -146,7 +146,7 @@ export const TOPICS: HelpTopic[] = [
   eula-remove --account NAME --app ID [--execute]
   accessibility-set --account NAME --app ID --device IPHONE|IPAD|APPLE_TV|APPLE_WATCH|MAC|VISION --supports voiceover,larger-text,... [--publish-labels]
   routing-coverage-upload --account NAME --app ID --version ID --file /absolute/coverage.geojson
-  cpp-keywords-set --account NAME --app ID --localization ID --keywords word1,word2` },
+  cpp-keywords-set --account NAME --app ID --localization ID --keywords word1,word2 [--platform IOS]` },
   { id: 'app-clips', title: 'App Clips and background assets', summary: 'App Clip experiences and Apple-hosted background asset packs.',
     commands: `  appclip-default-set --account NAME --app ID --clip ID --action OPEN|VIEW|PLAY [--version ID]
   appclip-localize --account NAME --app ID --experience ID --locale tr --subtitle TEXT

@@ -20,10 +20,15 @@ const app = (extra: Record<string, unknown> = {}) => fakeApi({
 } as never, { post: (path, body) => res(`new-${path.split('/').at(-1)}`, body.data.type) });
 
 test('custom product pages are created once with an editable version, then edited and localized', async () => {
-  const f = app({ '/v1/apps/123/appCustomProductPages': [], '/v1/appCustomProductPages/new-appCustomProductPages/appCustomProductPageVersions': [] });
+  const f = app({ '/v1/apps/123': res('123', 'apps', { primaryLocale: 'tr' }), '/v1/apps/123/appCustomProductPages': [], '/v1/appCustomProductPages/new-appCustomProductPages/appCustomProductPageVersions': [res('pv1', 'appCustomProductPageVersions', { state: 'PREPARE_FOR_SUBMISSION', deepLink: 'myapp://summer' })] });
   const created = await m.createCustomPage({ ...base, name: 'Summer', deepLink: 'myapp://summer' }, f.api);
-  assert.deepEqual([created.status, created.versionCreated], ['created', true]);
-  assert.equal((f.writes()[1]!.body as any).data.attributes.deepLink, 'myapp://summer');
+  assert.deepEqual([created.status, created.versionId, created.versionCreated], ['created', 'pv1', true]);
+  // Apple rejects a page without its first version and a localization inline; one request creates all three.
+  assert.equal(f.writes().length, 1);
+  const body = f.writes()[0]!.body as any;
+  assert.deepEqual(body.data.relationships.appCustomProductPageVersions.data, [{ type: 'appCustomProductPageVersions', id: '${version}' }]);
+  assert.equal(body.included[0].attributes.deepLink, 'myapp://summer');
+  assert.deepEqual(body.included[1].attributes, { locale: 'tr' });
   const again = app();
   assert.deepEqual(await m.createCustomPage({ ...base, name: 'Spring' }, again.api), { status: 'exists', pageId: 'page', versionId: 'pv', versionCreated: false });
   assert.equal(again.writes().length, 0);

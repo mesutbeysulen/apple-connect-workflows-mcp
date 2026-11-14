@@ -451,7 +451,7 @@ const commands: Record<string, Handler> = {
   'eula-remove': async (v, { account }) => { const a = required(v, 'app'); const acc = account(); return listing.removeEula({ account: acc, appId: a.app, execute: v.execute === true }, screenshotClient(acc)); },
   'accessibility-set': async (v, { account }) => { const a = required(v, 'app', 'device'); const acc = account(); return listing.setAccessibility({ account: acc, appId: a.app, device: a.device, supports: ids(v.supports ?? ''), publish: v['publish-labels'] === true }, screenshotClient(acc)); },
   'routing-coverage-upload': async (v, { account }) => { const a = required(v, 'app', 'version', 'file'); const acc = account(); return listing.uploadRoutingCoverage({ account: acc, appId: a.app, versionId: a.version, filePath: a.file }, screenshotClient(acc)); },
-  'cpp-keywords-set': async (v, { account }) => { const a = required(v, 'app', 'localization', 'keywords'); const acc = account(); return listing.setCustomPageKeywords({ account: acc, appId: a.app, localizationId: a.localization, keywords: ids(a.keywords) }, screenshotClient(acc)); },
+  'cpp-keywords-set': async (v, { account }) => { const a = required(v, 'app', 'localization', 'keywords'); const acc = account(); return listing.setCustomPageKeywords({ account: acc, appId: a.app, localizationId: a.localization, keywords: ids(a.keywords), platform: v.platform }, screenshotClient(acc)); },
   'winback-create': async (v, { account }) => {
     const a = required(v, 'app', 'subscription', 'name', 'offer', 'offer-mode', 'duration', 'periods', 'paid-months', 'lapsed-min', 'lapsed-max', 'start-date', 'priority', 'prices');
     const acc = account();

@@ -2,6 +2,17 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/); while the version is below 1.0, a minor release may contain breaking changes, which are marked **Breaking**.
 
+## 0.15.0 — 2026-11-14
+
+### Fixed
+Found by running marketing, webhook and sandbox writes against an unreleased app on a live account:
+- `cpp-create` failed on every new page: Apple requires the first page version and a localization in the same request. It now creates all three at once, using the app's primary language.
+- `cpp-keywords-set` failed: Apple requires `filter[platform]` when reading the app's keywords. A new `--platform` option defaults to `IOS`.
+- Contract tests now also catch a missing required filter, and a filter Apple refuses on a version localization's keywords.
+
+### Verified live
+`cpp-create`, `cpp-update`, `cpp-localize`, `cpp-delete`, `event-create`, `event-localize`, `event-update`, `event-delete`, `webhook-create` (rerun updates the secret, never prints it), `webhook-disable`, `webhook-enable`, `webhook-ping`, `webhook-delete`, `sandbox-tester-update`, `release-check` and the `availability-set` preview. Product page A/B tests need an app that is live on the App Store, so `experiment-create` is not yet verified.
+
 ## 0.14.0 — 2026-11-14
 
 ### Changed

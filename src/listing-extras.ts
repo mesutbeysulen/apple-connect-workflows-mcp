@@ -126,8 +126,10 @@ export async function uploadRoutingCoverage(input: { account: Account; appId: st
 
 // ---- Custom Product Page search keywords ----
 /** Sets which of the app's own keywords a Custom Product Page appears for in search. */
-export async function setCustomPageKeywords(input: { account: Account; appId: string; localizationId: string; keywords: string[] }, api: ListingAPI) {
+export async function setCustomPageKeywords(input: { account: Account; appId: string; localizationId: string; keywords: string[]; platform?: string }, api: ListingAPI) {
   const { account, appId, localizationId } = input;
+  const platform = input.platform ?? 'IOS';
+  if (!['IOS', 'MAC_OS', 'TV_OS', 'VISION_OS'].includes(platform)) throw new Error('Platform must be IOS, MAC_OS, TV_OS or VISION_OS.');
   requireWrite(account, appId); needApp(appId);
   if (!validId(localizationId)) throw new Error('Invalid localization ID.');
   const wanted = [...new Set(input.keywords.map(k => k.trim().toLowerCase()).filter(Boolean))];
@@ -142,7 +144,7 @@ export async function setCustomPageKeywords(input: { account: Account; appId: st
     }
   }
   if (!owned) throw new Error('Localization does not belong to this app.');
-  const appKeywords = await all(api, `/v1/apps/${appId}/searchKeywords?${new URLSearchParams({ 'filter[locale]': locale, limit: '200' })}`);
+  const appKeywords = await all(api, `/v1/apps/${appId}/searchKeywords?${new URLSearchParams({ 'filter[platform]': platform, 'filter[locale]': locale, limit: '200' })}`);
   const byWord = new Map(appKeywords.map(row => [String(row.id).toLowerCase(), row.id]));
   const missing = wanted.filter(word => !byWord.has(word));
   if (missing.length) throw new Error(`Not in the app's ${locale} keywords: ${missing.join(', ')}. A page can only use keywords the app already has.`);

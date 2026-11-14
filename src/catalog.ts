@@ -27,14 +27,16 @@ export function matchEndpoint(method: string, path: string): Endpoint | undefine
  * Requests Apple's OpenAPI document allows but the live API rejects, found by smoke-read against a
  * real account. Contract tests fail on them, and generic reads explain the working alternative.
  */
-const APPLE_REJECTS: { method: string; path: RegExp; query?: string; reason: string }[] = [
+const APPLE_REJECTS: { method: string; path: RegExp; query?: string; missing?: string; reason: string }[] = [
+  { method: 'GET', path: /^\/v1\/apps\/[^/]+\/searchKeywords$/, missing: 'filter[platform]', reason: "Apple requires filter[platform] here (400 'Filter platform is required')." },
+  { method: 'GET', path: /^\/v1\/appStoreVersionLocalizations\/[^/]+\/searchKeywords$/, query: 'filter[platform]', reason: "Apple rejects filters on this relationship (400 'Filter is not allowed in this context')." },
   { method: 'GET', path: /^\/v1\/apps\/[^/]+\/appEncryptionDeclarations$/, reason: "Apple answers 404 PATH_ERROR for this relationship. Use /v1/appEncryptionDeclarations?filter[app]=APP_ID." },
   { method: 'GET', path: /^\/v1\/bundleIds\/[^/]+\/bundleIdCapabilities$/, query: 'limit', reason: "Apple rejects 'limit' on this relationship (PARAMETER_ERROR.ILLEGAL). Omit it." },
 ];
 /** Why Apple rejects this request although the catalog lists it, if it does. */
 export function appleRejects(method: string, path: string): string | undefined {
   const url = new URL(path, 'https://api.appstoreconnect.apple.com');
-  return APPLE_REJECTS.find(rule => rule.method === method && rule.path.test(url.pathname) && (!rule.query || url.searchParams.has(rule.query)))?.reason;
+  return APPLE_REJECTS.find(rule => rule.method === method && rule.path.test(url.pathname) && (!rule.query || url.searchParams.has(rule.query)) && (!rule.missing || !url.searchParams.has(rule.missing)))?.reason;
 }
 /** Accepts only a real GET endpoint from Apple's catalog, so a generic read cannot reach anything else. */
 export function assertReadablePath(path: string): void {

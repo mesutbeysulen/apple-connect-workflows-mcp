@@ -93,3 +93,10 @@ test('requests the live API rejects are refused with the working alternative', (
   assert.equal(appleRejects('GET', '/v1/appEncryptionDeclarations?filter[app]=123'), undefined);
   assert.throws(() => assertReadablePath('/v1/apps/123/appEncryptionDeclarations'), /PATH_ERROR/);
 });
+
+test('search keyword reads follow the live API: platform required on the app, no filters on a version localization', () => {
+  assert.match(appleRejects('GET', '/v1/apps/123/searchKeywords?filter[locale]=en-US&limit=200')!, /filter\[platform\]/);
+  assert.equal(appleRejects('GET', '/v1/apps/123/searchKeywords?filter[platform]=IOS&filter[locale]=en-US'), undefined);
+  assert.match(appleRejects('GET', '/v1/appStoreVersionLocalizations/l/searchKeywords?filter[platform]=IOS')!, /not allowed/);
+  assert.equal(appleRejects('GET', '/v1/appStoreVersionLocalizations/l/searchKeywords?limit=200'), undefined);
+});

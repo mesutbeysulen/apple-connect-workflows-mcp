@@ -52,12 +52,22 @@ export async function createCustomPage(input: { account: Account; appId: string;
   url(deepLink, 'Deep link');
   let page = (await pages(api, appId)).find(row => row.attributes.name === name);
   const status = page ? 'exists' as const : 'created' as const;
-  page ??= await api.post('/v1/appCustomProductPages', { data: { type: 'appCustomProductPages', attributes: { name }, relationships: { app: rel('apps', appId) } } });
+  if (!page) {
+    // Apple requires the first version and a localization inline (409 RELATIONSHIP.REQUIRED otherwise).
+    const locale = String((await api.get(`/v1/apps/${appId}`)).attributes.primaryLocale ?? 'en-US');
+    page = await api.post('/v1/appCustomProductPages', {
+      data: { type: 'appCustomProductPages', attributes: { name }, relationships: { app: rel('apps', appId), appCustomProductPageVersions: { data: [{ type: 'appCustomProductPageVersions', id: '${version}' }] } } },
+      included: [
+        { type: 'appCustomProductPageVersions', id: '${version}', ...(deepLink ? { attributes: { deepLink } } : {}), relationships: { appCustomProductPageLocalizations: { data: [{ type: 'appCustomProductPageLocalizations', id: '${localization}' }] } } },
+        { type: 'appCustomProductPageLocalizations', id: '${localization}', attributes: { locale } },
+      ],
+    });
+  }
   const versions = await all(api, `/v1/appCustomProductPages/${page.id}/appCustomProductPageVersions?limit=200`);
   const editable = versions.find(row => ['PREPARE_FOR_SUBMISSION', 'REJECTED'].includes(String(row.attributes.state)));
   const version = editable ?? await api.post('/v1/appCustomProductPageVersions', { data: { type: 'appCustomProductPageVersions', ...(deepLink ? { attributes: { deepLink } } : {}), relationships: { appCustomProductPage: rel('appCustomProductPages', page.id) } } });
-  if (editable && deepLink !== undefined && editable.attributes.deepLink !== deepLink) await api.patch(`/v1/appCustomProductPageVersions/${editable.id}`, 'appCustomProductPageVersions', editable.id, { deepLink });
-  return { status, pageId: page.id, versionId: version.id, versionCreated: !editable };
+  if (status === 'exists' && editable && deepLink !== undefined && editable.attributes.deepLink !== deepLink) await api.patch(`/v1/appCustomProductPageVersions/${editable.id}`, 'appCustomProductPageVersions', editable.id, { deepLink });
+  return { status, pageId: page.id, versionId: version.id, versionCreated: status === 'created' || !editable };
 }
 export async function updateCustomPage(input: { account: Account; appId: string; pageId: string; name?: string; visible?: boolean }, api: MarketingAPI) {
   const { account, appId, pageId, name, visible } = input;

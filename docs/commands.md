@@ -223,7 +223,7 @@ Win-back offers and retention messages for subscriptions.
 <a id="marketing"></a>
 ## Marketing
 
-Custom Product Pages, in-app events and product page A/B tests. Custom Product Pages, in-app events, product page A/B tests.
+Custom Product Pages, in-app events and product page A/B tests. A/B tests need an app that is live on the App Store; Apple keeps a deleted page's name reserved for a while.
 
 ```text
   cpp-create --account NAME --app ID --name TEXT [--deep-link URL]
@@ -256,7 +256,7 @@ Custom license agreement, accessibility labels, routing coverage and Custom Prod
   eula-remove --account NAME --app ID [--execute]
   accessibility-set --account NAME --app ID --device IPHONE|IPAD|APPLE_TV|APPLE_WATCH|MAC|VISION --supports voiceover,larger-text,... [--publish-labels]
   routing-coverage-upload --account NAME --app ID --version ID --file /absolute/coverage.geojson
-  cpp-keywords-set --account NAME --app ID --localization ID --keywords word1,word2
+  cpp-keywords-set --account NAME --app ID --localization ID --keywords word1,word2 [--platform IOS]
 ```
 
 <a id="app-clips"></a>
