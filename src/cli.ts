@@ -3,6 +3,9 @@ import { parseArgs } from 'node:util';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { userInfo } from 'node:os';
 import { allHelp, findTopic, overview, topicHelp } from './help.js';
+import { readFileSync } from 'node:fs';
+
+const PACKAGE_VERSION = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
 import { accountIdentity, loadConfig, requireCapability, type Account, type Capability, type Config } from './config.js';
 import { PlanStore } from './plans.js';
 import { ConnectService } from './service.js';
@@ -579,7 +582,7 @@ async function main(): Promise<void> {
   if (command === 'help' || values.help) {
     // `help`, `help <topic|command>`, `<command> --help`; `help all` prints every command.
     const subject = command === 'help' ? positionals[1] : command === 'serve' && !positionals[0] ? undefined : command;
-    if (!subject) { console.log(overview()); return; }
+    if (!subject) { console.log(`apple-connect-mcp ${PACKAGE_VERSION}\n\n${overview()}`); return; }
     if (subject === 'all') { console.log(allHelp()); return; }
     const topic = findTopic(subject);
     if (!topic) throw new Error(`No help for ${subject}. Run apple-connect-mcp help to see topics.`);

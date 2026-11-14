@@ -2,6 +2,14 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/); while the version is below 1.0, a minor release may contain breaking changes, which are marked **Breaking**.
 
+## 0.18.0 — 2026-11-14
+
+### Added
+- Listed in the official MCP Registry as `io.github.mesutbeysulen/apple-connect-workflows-mcp`. Each release publishes there from GitHub Actions with OIDC; a test keeps `server.json` in step with `package.json`.
+- `SECURITY.md` with how to report a vulnerability privately and what counts.
+- Issue templates for bugs and feature requests, and a pull request checklist.
+- `apple-connect-mcp --help` starts with the installed version.
+
 ## 0.17.0 — 2026-11-14
 
 ### Changed

@@ -1,0 +1,40 @@
+name: Bug report
+description: A command or tool does the wrong thing or fails.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste a `.p8` key, JWT, password or other credential. For a security issue, use the Security tab instead (see SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The first line of `apple-connect-mcp --help`, for example 0.18.0.
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command or MCP tool
+      description: For example `cpp-create` or `release_readiness`.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran (with IDs replaced by placeholders), what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Error output
+      description: Apple's error text, such as `Apple API HTTP 409 (ENTITY_ERROR...) ...`, helps most. `smoke-read --out report.json` output is also useful; it holds no field values.
+      render: text
+  - type: dropdown
+    id: account
+    attributes:
+      label: Key type
+      options: [Team key, Individual key, Not sure]

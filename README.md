@@ -21,19 +21,19 @@ https://github.com/mesutbeysulen/apple-connect-workflows-mcp — install this MC
 Node.js 24 or newer. Pass the path to your `.p8` key, never its contents:
 
 ```sh
-npx -y apple-connect-workflows-mcp@0.17.0 key-setup \
+npx -y apple-connect-workflows-mcp@0.18.0 key-setup \
   --config "$HOME/.apple-connect-mcp/config.json" \
   --name main --issuer YOUR_ISSUER_UUID \
   --p8 /absolute/path/AuthKey_ABCDEFGHIJ.p8
 
-npx -y apple-connect-workflows-mcp@0.17.0 doctor --config "$HOME/.apple-connect-mcp/config.json"
+npx -y apple-connect-workflows-mcp@0.18.0 doctor --config "$HOME/.apple-connect-mcp/config.json"
 ```
 
 Register it with Claude Code (for Codex CLI, use `codex mcp add` with the same arguments):
 
 ```sh
 claude mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.17.0 serve
+  npx -y apple-connect-workflows-mcp@0.18.0 serve
 ```
 
 For individual keys, other clients, source installs and enabling writes, see [Getting started](docs/getting-started.md).
@@ -49,6 +49,7 @@ For individual keys, other clients, source installs and enabling writes, see [Ge
 | [MCP tools](docs/mcp-tools.md) | Every tool the server exposes, with read-only hints |
 | [Changelog](CHANGELOG.md) | Changes per release, including breaking ones |
 | [AGENTS.md](AGENTS.md) | Instructions an assistant follows to install the server for you |
+| [Security policy](SECURITY.md) | How to report a vulnerability privately |
 
 ## What it supports
 
@@ -95,7 +96,7 @@ CI runs on Node.js 24 and 26. To regenerate the API catalog from an Apple OpenAP
 
 ### Releasing
 
-Add a section to `CHANGELOG.md`, bump `version` in `package.json` and the pinned version in `README.md`, `AGENTS.md` and `docs/getting-started.md`, then push to `main`. The Release workflow runs only when npm does not have that version yet: it runs the checks and tests, publishes to npm, then creates the `v<version>` tag and a GitHub release.
+Add a section to `CHANGELOG.md`, bump `version` in `package.json`, both versions in `server.json`, and the pinned version in `README.md`, `AGENTS.md` and `docs/getting-started.md`, then push to `main`. The Release workflow runs only when npm does not have that version yet: it runs the checks and tests, publishes to npm, creates the `v<version>` tag and a GitHub release, and lists the version in the [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.mesutbeysulen/apple-connect-workflows-mcp`.
 
 Publishing uses npm trusted publishing with provenance for the workflow `release.yml`. If an `NPM_TOKEN` repository secret exists, the workflow publishes with that token instead and skips provenance.
 

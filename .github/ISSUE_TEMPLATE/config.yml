@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/mesutbeysulen/apple-connect-workflows-mcp/security/advisories/new
+    about: Report privately; do not open a public issue.
+  - name: Getting started
+    url: https://github.com/mesutbeysulen/apple-connect-workflows-mcp/blob/main/docs/getting-started.md
+    about: Install, API key setup and client registration.
