@@ -367,7 +367,7 @@ Devices, App ID capabilities, certificates and provisioning profiles. Certificat
 API key setup, webhooks, the local webhook receiver and the write audit log. Keys and webhooks.
 
 ```text
-  key-setup --name NAME (--issuer UUID | --individual) --p8 /absolute/AuthKey_XXXXXXXXXX.p8 [--key-id ID] [--allow-app ID,...] [--replace]
+  key-setup --name NAME (--issuer UUID | --individual) --p8 /absolute/AuthKey_XXXXXXXXXX.p8 [--key-id ID] [--allow-app ID,... | --allow-app all] [--replace]
   webhook-create --account NAME --app ID --name TEXT --url https://... --events A,B   (secret from APPLE_WEBHOOK_SECRET)
   webhook-enable|webhook-disable|webhook-ping|webhook-delete --account NAME --app ID --webhook ID
   webhook-redeliver --account NAME --app ID --webhook ID --delivery ID

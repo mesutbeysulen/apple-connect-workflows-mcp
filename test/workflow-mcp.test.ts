@@ -27,7 +27,7 @@ test('MCP workflow uses saved digest, rejects file changes, and never replays an
   const config = join(dir, 'config.json');
   const file = join(dir, 'image.png');
   writeFileSync(file, 'first');
-  writeFileSync(config, JSON.stringify({ databasePath: join(dir, 'plans.sqlite'), accounts: [{ name: 'demo', issuerId: '11111111-1111-4111-8111-111111111111', keyId: 'ABCDEFGHIJ', privateKeyPath: join(dir, 'missing.p8'), readOnly: false, allowedAppIds: ['123'], mcpApply: true }] }));
+  writeFileSync(config, JSON.stringify({ databasePath: join(dir, 'plans.sqlite'), accounts: [{ name: 'demo', issuerId: '11111111-1111-4111-8111-111111111111', keyId: 'ABCDEFGHIJ', privateKeyPath: join(dir, 'missing.p8'), readOnly: false, allowedAppIds: ['123'] }] }));
   const client = new Client({ name: 'workflow-test', version: '1.0.0' });
   const transport = new StdioClientTransport({ command: process.execPath, args: [resolve('dist/cli.js'), 'serve', '--config', config], stderr: 'pipe' });
   try {
@@ -65,12 +65,12 @@ test('MCP workflow uses saved digest, rejects file changes, and never replays an
   } finally { await client.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('MCP clients cannot apply plans unless the account sets mcpApply; a person applies them in a terminal', { timeout: 30000 }, async () => {
+test('with mcpApply: false MCP clients cannot apply plans; a person applies them in a terminal', { timeout: 30000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'apple-workflow-'));
   const config = join(dir, 'config.json');
   const file = join(dir, 'image.png');
   writeFileSync(file, 'first');
-  writeFileSync(config, JSON.stringify({ databasePath: join(dir, 'plans.sqlite'), accounts: [{ name: 'demo', issuerId: '11111111-1111-4111-8111-111111111111', keyId: 'ABCDEFGHIJ', privateKeyPath: join(dir, 'missing.p8'), readOnly: false, allowedAppIds: ['123'] }] }));
+  writeFileSync(config, JSON.stringify({ databasePath: join(dir, 'plans.sqlite'), accounts: [{ name: 'demo', issuerId: '11111111-1111-4111-8111-111111111111', keyId: 'ABCDEFGHIJ', privateKeyPath: join(dir, 'missing.p8'), readOnly: false, allowedAppIds: ['123'], mcpApply: false }] }));
   const client = new Client({ name: 'workflow-test', version: '1.0.0' });
   const transport = new StdioClientTransport({ command: process.execPath, args: [resolve('dist/cli.js'), 'serve', '--config', config], stderr: 'pipe' });
   const cli = (...args: string[]) => spawnSync(process.execPath, [resolve('dist/cli.js'), ...args, '--config', config], { encoding: 'utf8' });

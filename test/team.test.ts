@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createWebhook, deleteWebhook, pingWebhook, redeliverWebhook, setWebhookEnabled, verifySignature, webhookReceiver, webhookSecret } from '../src/webhooks.js';
 import { setupKey } from '../src/key-setup.js';
-import { configSchema, requireCapability } from '../src/config.js';
+import { configSchema, requireCapability, requireWrite } from '../src/config.js';
 import { assertReadablePath, redactSecrets, searchCatalog } from '../src/catalog.js';
 import { AppleClient } from '../src/apple.js';
 import { PlanStore } from '../src/plans.js';
@@ -76,8 +76,15 @@ test('key setup stores a private copy, defaults to read-only and keeps other acc
     assert.equal(statSync(configPath).mode & 0o777, 0o600);
     assert.throws(() => setupKey({ name: 'main', issuerId, p8Path, configPath, keysDir }), /already exists/);
     assert.equal(setupKey({ name: 'second', issuerId, p8Path, configPath, keysDir, allowedAppIds: ['123'] }).readOnly, false);
+    // "all" (or "*") allows every app the key can see; MCP clients apply plans after the user approves in chat.
+    setupKey({ name: 'every', issuerId, p8Path, configPath, keysDir, allowedAppIds: ['all'] });
     const saved = configSchema.parse(JSON.parse(readFileSync(configPath, 'utf8')));
-    assert.deepEqual(saved.accounts.map(a => a.name), ['main', 'second']);
+    assert.deepEqual(saved.accounts.map(a => a.name), ['main', 'second', 'every']);
+    const every = saved.accounts.find(a => a.name === 'every')!;
+    assert.deepEqual([every.allowedAppIds, every.readOnly, every.mcpApply], [['*'], false, true]);
+    assert.doesNotThrow(() => requireWrite(every, '987654321'));
+    assert.throws(() => requireWrite(saved.accounts.find(a => a.name === 'second')!, '987654321'), /allowlist/);
+    assert.throws(() => configSchema.parse({ accounts: [{ ...every, allowedAppIds: ['12*'] }] }));
     assert(!readFileSync(configPath, 'utf8').includes('PRIVATE KEY'));
     assert(result.next.some(n => /delete the original/.test(n)));
     const stored = setupKey({ name: 'third', issuerId, p8Path: result.privateKeyPath, configPath, keysDir });

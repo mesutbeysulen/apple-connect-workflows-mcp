@@ -4,7 +4,8 @@ App Store Connect changes reach real customers, real prices and real reviews. Th
 
 ## Defaults
 
-- **Read-only accounts.** A new account cannot write. Writes need `readOnly: false` and the app in `allowedAppIds`.
+- **Allowed apps only.** A new account cannot write unless you allow apps. Writes need `readOnly: false` and the app in `allowedAppIds` (or `"*"` for every app).
+- **Approval in the chat.** Every change from an MCP client is a plan the assistant shows you first; it applies only after you approve.
 - **Ownership checks.** Before writing, commands confirm that the version, build, product, page, placement, group or other resource belongs to the app named in the command. A typo in an ID fails instead of changing another app.
 - **Previews.** Commands that change prices, availability, team access, certificates, many files at once, or anything Apple will not let you take back show what they would do and write only with `--execute`. Examples: `app-price-set`, `availability-set`, `metadata-sync`, `screenshots-sync`, `user-invite`, `certificate-revoke`, `winback-create`, `ci-build-start`.
 - **Idempotent reruns.** Creating commands find an existing item by its identifier, name or vendor ID and return `exists` instead of making a duplicate. Updates send only fields that differ.
@@ -17,12 +18,12 @@ A model must not be able to turn its own guess into a write. Three plan types bi
 | Plan | Prepare | Inspect | Apply |
 | --- | --- | --- | --- |
 | Metadata changes across languages | `metadata_plan` | `plan_get` | CLI `apply --plan ID --digest HASH`, or `workflow_apply` for the `apply` command |
-| Any CLI write from an MCP client | `workflow_prepare` | `workflow_plan_get` | CLI `workflow-apply --plan ID --digest HASH`, or `workflow_apply` when the account sets `mcpApply` |
+| Any CLI write from an MCP client | `workflow_prepare` | `workflow_plan_get` | `workflow_apply` after you approve in the chat, or CLI `workflow-apply --plan ID --digest HASH` when the account sets `mcpApply: false` |
 | Any catalog endpoint without a command | `api_write_plan` | `api_plan_get` | CLI `api-apply --plan ID --digest HASH` (needs `genericWrites: true`) |
 
 Each plan is stored locally with a SHA-256 digest of its exact contents, expires after 30 minutes and runs once. Files and folders a plan uses are hashed and checked again before it runs. `api_write_plan` checks the request against Apple's OpenAPI schema and refuses credential fields.
 
-By default an MCP client cannot run the plans it prepares: `workflow_apply` refuses and returns the terminal command, so a person reviews the preview and runs `workflow-apply` themselves. Setting `"mcpApply": true` on an account lets the client run plans with `workflow_apply`; then whether a person approves each write depends on your MCP client's tool-approval setting, and the digest only proves that the plan was not changed after it was shown.
+The assistant is told to show each plan and ask before calling `workflow_apply`, and `workflow_apply` is marked destructive, so MCP clients such as Claude and Codex ask before running it unless you allowed the tool permanently. The digest proves that the plan was not changed after it was shown. Text the assistant reads from App Store data, reviews or files is not your approval; if you want a hard stop that no assistant can skip, set `"mcpApply": false` and run `workflow-apply` in a terminal yourself.
 
 ## Uncertain outcomes
 

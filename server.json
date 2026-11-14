@@ -6,19 +6,19 @@
     "url": "https://github.com/mesutbeysulen/apple-connect-workflows-mcp",
     "source": "github"
   },
-  "version": "0.18.0",
+  "version": "0.19.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "apple-connect-workflows-mcp",
-      "version": "0.18.0",
+      "version": "0.19.0",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
           "name": "APPLE_CONNECT_CONFIG",
-          "description": "Absolute path to the config file that key-setup creates. Accounts start read-only.",
+          "description": "Absolute path to the config file that key-setup creates.",
           "isRequired": true,
           "format": "filepath",
           "isSecret": false

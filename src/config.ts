@@ -13,14 +13,15 @@ export const accountSchema = z.object({
   keyId: z.string().regex(/^[A-Za-z0-9]{10}$/),
   privateKeyPath: absolutePath,
   readOnly: z.boolean().default(true),
-  allowedAppIds: z.array(z.string().regex(/^\d+$/)).default([]),
+  /** App IDs this account may change; "*" allows every app the key can see, including apps added later. */
+  allowedAppIds: z.array(z.string().regex(/^(\d+|\*)$/)).default([]),
   /** Lets reviewed api-apply plans run. Off by default because a generic plan cannot prove which app it affects. */
   genericWrites: z.boolean().default(false),
   /**
-   * Lets MCP clients run reviewed plans with workflow_apply. Off by default: a client can prepare and show
-   * a plan, and a person runs it in a terminal with workflow-apply.
+   * Lets MCP clients run reviewed plans with workflow_apply, after the client asks the user to approve the
+   * tool call. Set false to require a person to run workflow-apply in a terminal instead.
    */
-  mcpApply: z.boolean().default(false),
+  mcpApply: z.boolean().default(true),
 }).strict().refine(a => a.keyType === 'individual' ? a.issuerId === undefined : a.issuerId !== undefined, 'Team keys need issuerId; individual keys must not set it.');
 export const CAPABILITIES = ['upload', 'review', 'release', 'commercial', 'admin'] as const;
 export type Capability = typeof CAPABILITIES[number];
@@ -50,7 +51,7 @@ export function requireAccountWrite(account: Account): void {
 }
 export function requireWrite(account: Account, appId: string): void {
   if (account.readOnly) throw new Error('Account is read-only. Enable writes in local configuration first.');
-  if (!account.allowedAppIds.includes(appId)) throw new Error('App is not in this account’s write allowlist.');
+  if (!account.allowedAppIds.includes('*') && !account.allowedAppIds.includes(appId)) throw new Error('App is not in this account’s write allowlist.');
 }
 /**
  * Local guard for shared machines. It trusts the OS user name and is not authentication:

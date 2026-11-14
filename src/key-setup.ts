@@ -11,7 +11,9 @@ export interface KeySetupResult { account: string; keyId: string; privateKeyPath
  * Accounts start read-only unless write-allowed apps are named. The key's contents are never printed.
  */
 export function setupKey(input: KeySetupInput): KeySetupResult {
-  const { name, issuerId, p8Path, configPath, allowedAppIds = [], replace = false } = input;
+  const { name, issuerId, p8Path, configPath, replace = false } = input;
+  // "all" is accepted for "*" so shells do not expand it.
+  const allowedAppIds = [...new Set((input.allowedAppIds ?? []).map(id => id === 'all' ? '*' : id))];
   if (!isAbsolute(p8Path) || !isAbsolute(configPath)) throw new Error('--p8 and --config must be absolute paths.');
   const keyId = input.keyId ?? basename(p8Path).match(/^AuthKey_([A-Za-z0-9]{10})\.p8$/)?.[1];
   if (!keyId) throw new Error('Pass --key-id, or keep Apple\'s AuthKey_XXXXXXXXXX.p8 file name.');

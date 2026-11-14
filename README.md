@@ -8,12 +8,12 @@
 
 A local [Model Context Protocol](https://modelcontextprotocol.io/) server and CLI for preparing and shipping apps and games through App Store Connect, from Claude, Codex or any MCP client. It covers the release path end to end: app information, screenshots, builds, TestFlight, App Review, release, in-app purchases, marketing, Game Center, Xcode Cloud, team and signing, and reports.
 
-It runs over stdio, keeps API keys on your machine, starts every account read-only, and stores plans and journals in a local SQLite database. It is not affiliated with Apple.
+It runs over stdio, keeps API keys on your machine, changes only the apps you allow, asks for your approval in the chat before every change, and stores plans and journals in a local SQLite database. It is not affiliated with Apple.
 
 **Give this line to your AI assistant to install and configure it:**
 
 ```text
-https://github.com/mesutbeysulen/apple-connect-workflows-mcp — install this MCP server for me and follow AGENTS.md. Keep the account read-only.
+https://github.com/mesutbeysulen/apple-connect-workflows-mcp — install this MCP server for me and follow AGENTS.md.
 ```
 
 ## Quick start
@@ -21,19 +21,19 @@ https://github.com/mesutbeysulen/apple-connect-workflows-mcp — install this MC
 Node.js 24 or newer. Pass the path to your `.p8` key, never its contents:
 
 ```sh
-npx -y apple-connect-workflows-mcp@0.18.0 key-setup \
+npx -y apple-connect-workflows-mcp@0.19.0 key-setup \
   --config "$HOME/.apple-connect-mcp/config.json" \
   --name main --issuer YOUR_ISSUER_UUID \
   --p8 /absolute/path/AuthKey_ABCDEFGHIJ.p8
 
-npx -y apple-connect-workflows-mcp@0.18.0 doctor --config "$HOME/.apple-connect-mcp/config.json"
+npx -y apple-connect-workflows-mcp@0.19.0 doctor --config "$HOME/.apple-connect-mcp/config.json"
 ```
 
 Register it with Claude Code (for Codex CLI, use `codex mcp add` with the same arguments):
 
 ```sh
 claude mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.18.0 serve
+  npx -y apple-connect-workflows-mcp@0.19.0 serve
 ```
 
 For individual keys, other clients, source installs and enabling writes, see [Getting started](docs/getting-started.md).
@@ -70,10 +70,10 @@ For individual keys, other clients, source installs and enabling writes, see [Ge
 
 ## How writes stay safe
 
-- Accounts are read-only until you set `readOnly: false` and list the app in `allowedAppIds`.
+- Accounts are read-only until you allow apps: `--allow-app ID1,ID2` or `--allow-app all` in `key-setup`, or `allowedAppIds` in the config.
 - Commands check that every ID belongs to the named app before writing.
 - Price, availability, team, signing and bulk changes preview first and write only with `--execute`.
-- From an MCP client, writes go through a saved plan with a SHA-256 digest that runs once. The client prepares and shows it; you run it with `apple-connect-mcp workflow-apply`. Set `mcpApply: true` on an account to let the client apply plans itself.
+- From an MCP client, every change is a saved plan with a SHA-256 digest that runs once. The assistant shows the plan and asks you in the chat; it applies only after you approve. Set `mcpApply: false` on an account to require running plans in a terminal instead.
 
 Details and limits are in the [safety model](docs/safety.md).
 

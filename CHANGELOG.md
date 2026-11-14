@@ -2,6 +2,16 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/); while the version is below 1.0, a minor release may contain breaking changes, which are marked **Breaking**.
 
+## 0.19.0 — 2026-11-15
+
+### Changed
+- Changes are approved in the chat: `mcpApply` now defaults to `true`. The assistant prepares a plan, shows it, asks you, and applies it with `workflow_apply` after you approve; MCP clients also prompt before this destructive tool. Set `"mcpApply": false` to require running `workflow-apply` in a terminal, as in 0.17.0.
+- The tool descriptions tell assistants to show each plan and get approval before applying it.
+- The install guide asks which apps the assistant may change instead of always starting read-only.
+
+### Added
+- `allowedAppIds: ["*"]`, or `key-setup --allow-app all`, allows every app the key can see, including apps added later.
+
 ## 0.18.0 — 2026-11-14
 
 ### Added
