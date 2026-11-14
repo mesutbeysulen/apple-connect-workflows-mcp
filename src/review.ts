@@ -8,10 +8,13 @@ export interface ReviewAPI {
   post(path: string, body: unknown): Promise<Resource>;
   patch(path: string, type: string, id: string, attributes: Record<string, unknown>): Promise<unknown>;
 }
-export type ReviewRelation = 'appStoreVersion' | 'appAssetLibraryImage' | 'appAssetLibraryVideo' | 'inAppPurchaseVersion' | 'subscriptionVersion' | 'subscriptionGroupVersion' | 'appCustomProductPageVersion' | 'appStoreVersionExperimentV2' | 'appEvent';
+export type ReviewRelation = 'appStoreVersion' | 'appAssetLibraryImage' | 'appAssetLibraryVideo' | 'inAppPurchaseVersion' | 'subscriptionVersion' | 'subscriptionGroupVersion' | 'appCustomProductPageVersion' | 'appStoreVersionExperimentV2' | 'appEvent'
+  | 'gameCenterLeaderboardVersion' | 'gameCenterAchievementVersion' | 'gameCenterLeaderboardSetVersion' | 'gameCenterActivityVersion' | 'gameCenterChallengeVersion';
 const TYPES: Record<ReviewRelation, string> = { appStoreVersion: 'appStoreVersions', appAssetLibraryImage: 'appAssetLibraryImages', appAssetLibraryVideo: 'appAssetLibraryVideos',
   inAppPurchaseVersion: 'inAppPurchaseVersions', subscriptionVersion: 'subscriptionVersions', subscriptionGroupVersion: 'subscriptionGroupVersions',
-  appCustomProductPageVersion: 'appCustomProductPageVersions', appStoreVersionExperimentV2: 'appStoreVersionExperiments', appEvent: 'appEvents' };
+  appCustomProductPageVersion: 'appCustomProductPageVersions', appStoreVersionExperimentV2: 'appStoreVersionExperiments', appEvent: 'appEvents',
+  gameCenterLeaderboardVersion: 'gameCenterLeaderboardVersions', gameCenterAchievementVersion: 'gameCenterAchievementVersions', gameCenterLeaderboardSetVersion: 'gameCenterLeaderboardSetVersions',
+  gameCenterActivityVersion: 'gameCenterActivityVersions', gameCenterChallengeVersion: 'gameCenterChallengeVersions' };
 export interface ReviewItem { relation: ReviewRelation; id: string }
 export interface ReviewResult { status: 'submitted' | 'resubmitted' | 'already_submitted'; submissionId: string; state: string; addedItems: string[] }
 const key = (relation: string, id: string) => `${relation}:${id}`;

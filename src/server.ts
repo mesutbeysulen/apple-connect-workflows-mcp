@@ -203,23 +203,40 @@ export function createServer(service: ConnectService, configPath?: string): McpS
     return output(await service.api(account).list(`/v1/${prefix}/${versionId}/images?limit=200`, 2000));
   });
   server.registerTool('game_center_overview', {
-    description: 'Show whether Game Center is enabled for an app, with its leaderboards, achievements (points and archived state) and which are released.',
+    description: 'Show whether Game Center is enabled for an app and list its leaderboards, leaderboard sets, achievements (with points used of 1000), activities and challenges. Use game_center_versions for one item\'s versions and languages.',
     inputSchema: z.object({ account: z.string(), appId: idSchema }).strict(), annotations: read,
   }, async ({ account, appId }) => {
     const api = service.api(account);
     let detail;
-    try { detail = await api.get(`/v1/apps/${appId}/gameCenterDetail`); } catch (error) { if (!(error instanceof Error && /HTTP 404/.test(error.message))) throw error; }
+    try { detail = await api.get(`/v1/apps/${appId}/gameCenterDetail?include=gameCenterGroup`); } catch (error) { if (!(error instanceof Error && /HTTP 404/.test(error.message))) throw error; }
     if (!detail) return output({ enabled: false });
-    const [leaderboards, achievements, leaderboardReleases, achievementReleases] = await Promise.all([
-      api.list(`/v1/gameCenterDetails/${detail.id}/gameCenterLeaderboards?limit=200`, 2000), api.list(`/v1/gameCenterDetails/${detail.id}/gameCenterAchievements?limit=200`, 2000),
-      api.list(`/v1/gameCenterDetails/${detail.id}/leaderboardReleases?limit=200&include=gameCenterLeaderboard`, 2000), api.list(`/v1/gameCenterDetails/${detail.id}/achievementReleases?limit=200&include=gameCenterAchievement`, 2000)]);
-    const points = achievements.data.filter(row => row.attributes.archived !== true).reduce((sum, row) => sum + Number(row.attributes.points ?? 0), 0);
-    return output({ enabled: true, gameCenterId: detail.id, leaderboards, achievements, achievementPoints: { used: points, max: 1000 }, leaderboardReleases, achievementReleases });
+    const list = (relation: string) => api.list(`/v1/gameCenterDetails/${detail.id}/${relation}?limit=200`, 2000);
+    const [leaderboards, leaderboardSets, achievements, activities, challenges] = await Promise.all(['gameCenterLeaderboards', 'gameCenterLeaderboardSets', 'gameCenterAchievements', 'gameCenterActivities', 'gameCenterChallenges'].map(list));
+    const points = achievements!.data.filter(row => row.attributes.archived !== true).reduce((sum, row) => sum + Number(row.attributes.points ?? 0), 0);
+    return output({ enabled: true, gameCenterId: detail.id, group: detail.relationships?.gameCenterGroup?.data ?? null, leaderboards, leaderboardSets, achievements, achievementPoints: { used: points, max: 1000 }, activities, challenges });
   });
-  server.registerTool('game_center_localizations', {
-    description: 'List the languages of one leaderboard or achievement.',
-    inputSchema: z.object({ account: z.string(), kind: z.enum(['leaderboard', 'achievement']), id: idSchema }).strict(), annotations: read,
-  }, async ({ account, kind, id }) => output(await service.api(account).list(`/v1/${kind === 'leaderboard' ? 'gameCenterLeaderboards' : 'gameCenterAchievements'}/${id}/localizations?limit=200`, 2000)));
+  server.registerTool('game_center_versions', {
+    description: 'List the versions of one Game Center item with their state, and the languages of each version.',
+    inputSchema: z.object({ account: z.string(), kind: z.enum(['leaderboard', 'achievement', 'leaderboard-set', 'activity', 'challenge']), id: idSchema }).strict(), annotations: read,
+  }, async ({ account, kind, id }) => {
+    const api = service.api(account);
+    const base = { leaderboard: ['/v2/gameCenterLeaderboards', '/v2/gameCenterLeaderboardVersions'], achievement: ['/v2/gameCenterAchievements', '/v2/gameCenterAchievementVersions'],
+      'leaderboard-set': ['/v2/gameCenterLeaderboardSets', '/v2/gameCenterLeaderboardSetVersions'], activity: ['/v1/gameCenterActivities', '/v1/gameCenterActivityVersions'],
+      challenge: ['/v1/gameCenterChallenges', '/v1/gameCenterChallengeVersions'] }[kind];
+    const versions = await api.list(`${base[0]}/${id}/versions?limit=200`, 200);
+    return output(await Promise.all(versions.data.map(async version => ({ version, localizations: (await api.list(`${base[1]}/${version.id}/localizations?limit=200`, 2000)).data }))));
+  });
+  server.registerTool('game_center_matchmaking', {
+    description: 'List the team\'s Game Center matchmaking rule sets with their rules, teams and queues.',
+    inputSchema: z.object({ account: z.string() }).strict(), annotations: read,
+  }, async ({ account }) => {
+    const api = service.api(account);
+    const ruleSets = await api.list('/v1/gameCenterMatchmakingRuleSets?limit=200', 2000);
+    return output(await Promise.all(ruleSets.data.map(async ruleSet => ({ ruleSet,
+      rules: (await api.list(`/v1/gameCenterMatchmakingRuleSets/${ruleSet.id}/rules?limit=200`, 2000)).data,
+      teams: (await api.list(`/v1/gameCenterMatchmakingRuleSets/${ruleSet.id}/teams?limit=200`, 2000)).data,
+      queues: (await api.list(`/v1/gameCenterMatchmakingRuleSets/${ruleSet.id}/matchmakingQueues?limit=200`, 2000)).data }))));
+  });
   server.registerTool('users_list', {
     description: 'List team members with roles and whether they see all apps. Contains names and emails; treat as personal data.',
     inputSchema: z.object({ account: z.string() }).strict(), annotations: read,

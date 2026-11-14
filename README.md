@@ -26,7 +26,7 @@ https://github.com/mesutbeysulen/apple-connect-workflows-mcp — install this MC
 | App Review and release | Check readiness, submit versions, manage phased release, publish manual releases, reply to reviews |
 | Marketing | Create Custom Product Pages, in-app events, and product page A/B tests; place Asset Library media on them; submit them for review |
 | Team and signing | Invite and manage team members, register devices, toggle App ID capabilities, issue and revoke certificates from your own CSR, create and download provisioning profiles |
-| Game Center | Enable Game Center, create and localize leaderboards and achievements, upload their images, release them to players |
+| Game Center | Enable Game Center; create, version, localize and submit leaderboards, leaderboard sets, achievements, activities and challenges with images checked against Apple's sizes; link items to activities; manage groups and matchmaking rule sets, rules, teams and queues |
 | Commerce | Manage in-app purchases, subscriptions, localizations, price schedules, sales territories, introductory and promotional offers, offer codes, promoted purchases, product review screenshots, and sandbox testers |
 | Reporting | Download sales, finance, and analytics reports; request analytics reports |
 | Webhooks and API access | Manage webhooks, inspect delivery events, search the API catalog, and prepare catalog-backed API writes |
@@ -48,26 +48,26 @@ Run `workflow_catalog` in your MCP client for the complete list of CLI workflows
 Use the published version with Node.js 24 or newer:
 
 ```sh
-npx -y apple-connect-workflows-mcp@0.8.0 --help
+npx -y apple-connect-workflows-mcp@0.9.0 --help
 ```
 
 For a team API key, create a local config file. The tool copies the key into a private local directory; pass only its file path:
 
 ```sh
-npx -y apple-connect-workflows-mcp@0.8.0 key-setup \
+npx -y apple-connect-workflows-mcp@0.9.0 key-setup \
   --config "$HOME/.apple-connect-mcp/config.json" \
   --name main --issuer YOUR_ISSUER_UUID \
   --p8 /absolute/path/AuthKey_ABCDEFGHIJ.p8
 ```
 
-For an individual key, replace `--issuer YOUR_ISSUER_UUID` with `--individual`. Register the MCP server with your client using `npx -y apple-connect-workflows-mcp@0.8.0 serve` and `APPLE_CONNECT_CONFIG` set to the config path. For Codex CLI:
+For an individual key, replace `--issuer YOUR_ISSUER_UUID` with `--individual`. Register the MCP server with your client using `npx -y apple-connect-workflows-mcp@0.9.0 serve` and `APPLE_CONNECT_CONFIG` set to the config path. For Codex CLI:
 
 ```sh
 codex mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.8.0 serve
+  npx -y apple-connect-workflows-mcp@0.9.0 serve
 ```
 
-Run `npx -y apple-connect-workflows-mcp@0.8.0 doctor --config "$HOME/.apple-connect-mcp/config.json"` to check the selected account. Accounts start read-only.
+Run `npx -y apple-connect-workflows-mcp@0.9.0 doctor --config "$HOME/.apple-connect-mcp/config.json"` to check the selected account. Accounts start read-only.
 
 ## Manual installation
 
