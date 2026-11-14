@@ -198,11 +198,21 @@ export async function setVersionLocale(input: { account: Account; appId: string;
 }
 export interface ReviewContact { contactFirstName?: string; contactLastName?: string; contactPhone?: string; contactEmail?: string; demoAccountRequired?: boolean; demoAccountName?: string; demoAccountPassword?: string; notes?: string }
 /** Sets the App Review contact and test login. The password arrives from the environment, never as an argument. */
+const CONTACT = ['contactFirstName', 'contactLastName', 'contactPhone', 'contactEmail'] as const;
+const CONTACT_FLAGS = { contactFirstName: '--first-name', contactLastName: '--last-name', contactPhone: '--phone', contactEmail: '--email' } as const;
+/** Apple answers 409 ATTRIBUTE.REQUIRED to any change of an existing review detail while one of these four is empty. */
+function requireFullContact(what: string, existing: Resource, fields: ReviewContact): void {
+  const changes = Object.entries(fields).some(([key, value]) => value !== undefined && existing.attributes[key] !== value);
+  const missing = CONTACT.filter(key => !(fields[key] ?? existing.attributes[key]));
+  if (changes && missing.length) throw new Error(`${what} needs a full contact before any change; also pass ${missing.map(key => CONTACT_FLAGS[key]).join(', ')}.`);
+}
 export async function setReviewDetail(input: { account: Account; appId: string; versionId: string } & ReviewContact, api: PrepAPI): Promise<Upsert> {
   const { account, appId, versionId, ...fields } = input;
   requireWrite(account, appId);
   await ownedVersion(api, appId, versionId);
   const existing = await optional(api, `/v1/appStoreVersions/${versionId}/appStoreReviewDetail`);
+  // Apple creates review details with any subset of fields, but rejects later changes until the contact is complete.
+  if (existing) requireFullContact('App Review', existing, fields);
   return upsert(api, existing, 'appStoreReviewDetails', 'v1', fields, () => ({ data: { type: 'appStoreReviewDetails', attributes: clean({ ...fields }), relationships: { appStoreVersion: rel('appStoreVersions', versionId) } } }));
 }
 /** Uploads a file for App Review, such as a demo video, to this version's review details. */
@@ -270,7 +280,9 @@ export async function setBetaBuildNotes(input: { account: Account; appId: string
 export async function setBetaReviewDetail(input: { account: Account; appId: string } & ReviewContact, api: PrepAPI): Promise<Upsert> {
   const { account, appId, ...fields } = input;
   requireWrite(account, appId); needId(appId);
-  return upsert(api, await api.get(`/v1/apps/${appId}/betaAppReviewDetail`), 'betaAppReviewDetails', 'v1', fields, () => { throw new Error('Beta review detail not found.'); });
+  const existing = await api.get(`/v1/apps/${appId}/betaAppReviewDetail`);
+  requireFullContact('Beta App Review', existing, fields);
+  return upsert(api, existing, 'betaAppReviewDetails', 'v1', fields, () => { throw new Error('Beta review detail not found.'); });
 }
 /** Sends a build to Beta App Review, which external testing requires. */
 export async function submitBetaReview(input: { account: Account; appId: string; buildId: string }, api: PrepAPI): Promise<{ status: 'submitted' | 'already_submitted'; id: string; state?: unknown }> {

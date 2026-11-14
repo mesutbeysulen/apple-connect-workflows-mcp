@@ -37,13 +37,23 @@ export function createTokenProvider(account: Account): () => string {
   };
 }
 export class AppleError extends Error {
-  constructor(public status: number, public codes: string[]) {
-    super(`Apple API HTTP ${status}${codes.length ? ` (${codes.join(', ')})` : ''}. ${
+  /** Apple's own explanations, such as which attribute is invalid; kept short and free of credentials. */
+  constructor(public status: number, public codes: string[], public details: string[] = []) {
+    super(`Apple API HTTP ${status}${codes.length ? ` (${codes.join(', ')})` : ''}. ${details.length ? `${details.join(' ')} ` : ''}${
       status === 401 ? 'Check team key, issuer and system clock.' :
       status === 403 ? 'Check API role and app access.' :
       status === 409 ? 'Resource state conflicts with this operation.' :
       status === 429 ? 'Rate limited; retry later.' : 'Inspect account/resource state and retry explicitly.'}`);
   }
+}
+/** Apple's error details with the offending attribute, deduplicated and capped; JWTs are never echoed by Apple, but strip anything token-shaped anyway. */
+export function errorDetails(errors: { detail?: string; source?: { pointer?: string; parameter?: string } }[]): string[] {
+  const lines = errors.map(e => {
+    const where = e.source?.pointer?.split('/').pop() ?? e.source?.parameter;
+    const detail = (e.detail ?? '').replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, '[token]').trim();
+    return detail ? (where && !detail.includes(where) ? `${where}: ${detail}` : detail) : '';
+  }).filter(Boolean);
+  return [...new Set(lines)].slice(0, 5).map(line => line.length > 200 ? `${line.slice(0, 200)}…` : line);
 }
 export class AppleClient implements AppleAPI {
   constructor(private token: () => string, private fetcher: typeof fetch = fetch,
@@ -73,8 +83,8 @@ export class AppleClient implements AppleAPI {
         continue;
       }
       if (!response.ok) {
-        const data = await response.json().catch(() => ({})) as { errors?: { code?: string }[] };
-        throw new AppleError(response.status, (data.errors ?? []).map(e => e.code ?? '').filter(Boolean));
+        const data = await response.json().catch(() => ({})) as { errors?: { code?: string; detail?: string; source?: { pointer?: string; parameter?: string } }[] };
+        throw new AppleError(response.status, (data.errors ?? []).map(e => e.code ?? '').filter(Boolean), errorDetails(data.errors ?? []));
       }
       return response;
     }

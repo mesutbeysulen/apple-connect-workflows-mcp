@@ -103,6 +103,10 @@ test('version languages, review contact, phased release and review draft cleanup
   await assert.rejects(prep.setVersionLocale({ ...v, locale: 'tr', keywords: 'ş'.repeat(51) }, f.api), /100 bytes/);
   await assert.rejects(prep.setVersionLocale({ ...v, locale: '../x' }, f.api), /Invalid locale/);
   assert.equal((await prep.setReviewDetail({ ...v, contactFirstName: 'A', contactLastName: 'B', contactPhone: '+1', contactEmail: 'a@x.co', demoAccountRequired: true, demoAccountName: 'u', demoAccountPassword: 'p' }, f.api)).status, 'created');
+  // Apple creates a review detail from notes alone, but rejects later changes until the contact is complete.
+  const notesOnly = fakeApi(base({ '/v1/appStoreVersions/v/appStoreReviewDetail': res('rd', 'appStoreReviewDetails', { notes: 'old' }) }));
+  await assert.rejects(prep.setReviewDetail({ ...v, notes: 'new' }, notesOnly.api), /App Review needs a full contact.*--first-name, --last-name, --phone, --email/);
+  assert.equal((await prep.setReviewDetail({ ...v, notes: 'old' }, notesOnly.api)).status, 'unchanged');
   assert.equal((await prep.setPhasedRelease({ ...v, state: 'ACTIVE' }, f.api)).status, 'created');
   await assert.rejects(prep.setPhasedRelease({ ...v, state: 'FAST' }, f.api), /must be one of/);
   const live = fakeApi(base({ '/v1/appStoreVersions/v/appStoreVersionPhasedRelease': res('ph', 'appStoreVersionPhasedReleases', { phasedReleaseState: 'ACTIVE' }) }));
@@ -134,6 +138,9 @@ test('TestFlight setup: beta text, notes, review, groups and testers', async () 
   assert.equal((await prep.setBetaAppInfo({ ...write, locale: 'tr', feedbackEmail: 'a@x.co', description: 'd' }, f.api)).status, 'created');
   assert.equal((await prep.setBetaBuildNotes({ ...write, buildId: 'b', locale: 'tr', whatsNew: 'new' }, f.api)).status, 'updated');
   assert.equal((await prep.setBetaReviewDetail({ ...write, contactEmail: 'a@x.co' }, f.api)).status, 'unchanged');
+  // Apple requires the whole contact before accepting any change; say which flags are missing instead of a 409.
+  await assert.rejects(prep.setBetaReviewDetail({ ...write, notes: 'n' }, f.api), /--first-name, --last-name, --phone/);
+  assert.equal((await prep.setBetaReviewDetail({ ...write, notes: 'n', contactFirstName: 'A', contactLastName: 'B', contactPhone: '+44 844 209 0611' }, f.api)).status, 'updated');
   assert.equal((await prep.submitBetaReview({ ...write, buildId: 'b' }, f.api)).status, 'submitted');
   assert.equal((await prep.createBetaGroup({ ...write, name: 'QA' }, f.api)).status, 'exists');
   assert.equal((await prep.createBetaGroup({ ...write, name: 'External', publicLink: true, feedback: true }, f.api)).status, 'created');

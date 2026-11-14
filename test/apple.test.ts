@@ -57,3 +57,20 @@ test('read throttling retries; uncertain mutations never auto-retry; redirects d
   count = 0;
   await assert.rejects(api.patch('/v1/apps/1', 'apps', '1', {}), /429/); assert.equal(count, 1);
 });
+
+test('Apple errors carry Apple\'s detail and the offending attribute, capped and without tokens', async () => {
+  const body = { errors: [
+    { code: 'ENTITY_ERROR.ATTRIBUTE.INVALID', detail: 'The phone number must be in a valid format.', source: { pointer: '/data/attributes/contactPhone' } },
+    { code: 'ENTITY_ERROR.ATTRIBUTE.INVALID', detail: 'The phone number must be in a valid format.', source: { pointer: '/data/attributes/contactPhone' } },
+    { code: 'PARAMETER_ERROR.ILLEGAL', detail: `bad eyJhbGciOiJFUzI1NiJ9.eyJpc3MiOiJ4In0.c2lnbmF0dXJl ${'x'.repeat(300)}`, source: { parameter: 'limit' } },
+  ] };
+  const client = new AppleClient(() => 'token', async () => new Response(JSON.stringify(body), { status: 409 }));
+  await assert.rejects(client.get('/v1/apps/1'), (error: Error) => {
+    assert.match(error.message, /contactPhone: The phone number must be in a valid format\./);
+    assert.equal(error.message.match(/contactPhone/g)!.length, 1);
+    assert.match(error.message, /limit: bad \[token\]/);
+    assert(!error.message.includes('eyJ'));
+    assert(error.message.length < 600);
+    return true;
+  });
+});

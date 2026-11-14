@@ -2,6 +2,18 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/); while the version is below 1.0, a minor release may contain breaking changes, which are marked **Breaking**.
 
+## 0.14.0 — 2026-11-14
+
+### Changed
+- Apple errors now include Apple's explanation and the attribute it refers to, for example `contactPhone: The phone number must be in a valid format…`, instead of only the error code.
+
+### Fixed
+Found by running the release-preparation writes against an unreleased app on a live account:
+- `review-detail-set` and `beta-review-detail-set` refuse a change to existing review details unless first name, last name, phone and email are all set, and name the missing flags. Apple otherwise answers 409 ATTRIBUTE.REQUIRED.
+
+### Verified live
+`version-localize`, `metadata-sync`, `app-info-set`, `version-update`, `review-detail-set`, `beta-info-set`, `beta-notes-set`, `beta-group-create`, `version-build-set`, `asset-upload` and `workflow_prepare`/`workflow_apply`, including idempotent reruns, the app allowlist, digest checks and the audit log.
+
 ## 0.13.0 — 2026-11-14
 
 ### Added
