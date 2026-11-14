@@ -2,6 +2,14 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/); while the version is below 1.0, a minor release may contain breaking changes, which are marked **Breaking**.
 
+## 0.15.1 — 2026-11-14
+
+### Verified live
+`bundle-id-create`, `capability-enable`, `capability-disable`, `profile-create`, `profile-download` and `profile-delete` on a throwaway App ID; `experiment-create`, `experiment-update`, `treatment-create` and `treatment-localize` on a live app with an unstarted experiment. No fixes were needed.
+
+### Changed
+- The safety guide notes that changing an App ID's capabilities invalidates its provisioning profiles.
+
 ## 0.15.0 — 2026-11-14
 
 ### Fixed

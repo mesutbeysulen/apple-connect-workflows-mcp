@@ -13,7 +13,7 @@ This guide installs the server, adds an App Store Connect API key, connects an M
 From npm (recommended), pinned to a version:
 
 ```sh
-npx -y apple-connect-workflows-mcp@0.15.0 --help
+npx -y apple-connect-workflows-mcp@0.15.1 --help
 ```
 
 From source, when you want to read or change the code:
@@ -25,7 +25,7 @@ npm ci
 npm run build
 ```
 
-Below, `apple-connect-mcp` stands for `npx -y apple-connect-workflows-mcp@0.15.0`, or `node /absolute/path/to/dist/cli.js` for a source checkout.
+Below, `apple-connect-mcp` stands for `npx -y apple-connect-workflows-mcp@0.15.1`, or `node /absolute/path/to/dist/cli.js` for a source checkout.
 
 ## 2. Add an API key
 
@@ -91,14 +91,14 @@ Claude Code:
 
 ```sh
 claude mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.15.0 serve
+  npx -y apple-connect-workflows-mcp@0.15.1 serve
 ```
 
 Codex CLI:
 
 ```sh
 codex mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.15.0 serve
+  npx -y apple-connect-workflows-mcp@0.15.1 serve
 ```
 
 Clients that use a JSON config:
@@ -108,7 +108,7 @@ Clients that use a JSON config:
   "mcpServers": {
     "apple-connect": {
       "command": "npx",
-      "args": ["-y", "apple-connect-workflows-mcp@0.15.0", "serve"],
+      "args": ["-y", "apple-connect-workflows-mcp@0.15.1", "serve"],
       "env": { "APPLE_CONNECT_CONFIG": "/absolute/path/config.json" }
     }
   }
