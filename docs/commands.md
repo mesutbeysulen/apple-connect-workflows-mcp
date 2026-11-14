@@ -39,6 +39,7 @@ Start the MCP server, check accounts, and run reviewed metadata plans.
 ```text
   serve                         Start stdio MCP (default)
   doctor                        Check configured accounts against Apple
+  smoke-read --account NAME [--app ID] [--out /absolute/report.json]  Run every read tool against Apple and report status, counts and field names (no writes)
   plan --plan ID                Print the exact saved plan and digest
   apply --plan ID --digest HASH  Execute this reviewed plan (requires writes enabled)
 ```

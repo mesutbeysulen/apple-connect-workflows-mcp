@@ -138,7 +138,7 @@ export async function setCapability(input: { account: Account; bundleId: string;
   requireAccountWrite(account); needIds(bundleId);
   if (!CAPABILITIES.includes(capability)) throw new Error(`Capability must be one of ${CAPABILITIES.join(', ')}.`);
   await api.get(`/v1/bundleIds/${bundleId}`);
-  const current = (await all(api, `/v1/bundleIds/${bundleId}/bundleIdCapabilities?limit=200`)).find(row => row.attributes.capabilityType === capability);
+  const current = (await all(api, `/v1/bundleIds/${bundleId}/bundleIdCapabilities`)).find(row => row.attributes.capabilityType === capability);
   if (enabled) {
     if (current) return { status: 'unchanged' as const, capabilityId: current.id };
     return { status: 'enabled' as const, capabilityId: (await api.post('/v1/bundleIdCapabilities', { data: { type: 'bundleIdCapabilities', attributes: { capabilityType: capability }, relationships: { bundleId: { data: { type: 'bundleIds', id: bundleId } } } } })).id };

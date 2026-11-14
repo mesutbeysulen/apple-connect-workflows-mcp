@@ -9,11 +9,12 @@ import { assetLibraryId } from './asset-library.js';
 import { PLACEMENT_GROUP_PATTERN } from './apple-rules.js';
 import { cleanupStaleAssets } from './asset-cleanup.js';
 import { buildStatus } from './build-status.js';
-import { buildRunSummary, cloudProduct } from './xcode-cloud.js';
+import { buildRunSummary, findCloudProduct } from './xcode-cloud.js';
 import { creativeOverview } from './creative-assets.js';
 import { releaseReadiness, manualCheckIds } from './release.js';
 import { assertReadablePath, matchEndpoint, redactSecrets, searchCatalog } from './catalog.js';
 import { requestSchema } from './schema-check.js';
+import { AppleError } from './apple.js';
 import { createApiPlan } from './api-plans.js';
 import { metadataFileSchema, syncMetadata } from './bulk.js';
 import { registerWorkflowTools } from './workflow-mcp.js';
@@ -117,7 +118,7 @@ export function createServer(service: ConnectService, configPath?: string): McpS
   server.registerTool('encryption_declarations_list', {
     description: 'List an app’s export-compliance declarations and Apple review states. Legal classification must be checked by the operator.',
     inputSchema: z.object({ account: z.string(), appId: idSchema }).strict(), annotations: read,
-  }, async ({ account, appId }) => output(await service.api(account).list(`/v1/apps/${appId}/appEncryptionDeclarations?limit=200`, 2000)));
+  }, async ({ account, appId }) => output(await service.api(account).list(`/v1/appEncryptionDeclarations?filter[app]=${appId}&limit=200`, 2000)));
   server.registerTool('build_encryption_status', {
     description: 'Read the declaration attached to one build, if any, and its Apple approval state.',
     inputSchema: z.object({ account: z.string(), buildId: idSchema }).strict(), annotations: read,
@@ -223,9 +224,10 @@ export function createServer(service: ConnectService, configPath?: string): McpS
     inputSchema: z.object({ account: z.string(), appId: idSchema, recent: z.number().int().min(1).max(200).default(20) }).strict(), annotations: read,
   }, async ({ account, appId, recent }) => {
     const api = service.api(account);
-    const product = await cloudProduct(api, appId);
+    const product = await findCloudProduct(api, appId);
+    if (!product) return output({ enabled: false, note: 'Xcode Cloud is not set up for this app. Set it up once in Xcode.' });
     const [workflows, runs] = await Promise.all([api.list(`/v1/ciProducts/${product.id}/workflows?limit=200`, 2000), api.list(`/v1/ciProducts/${product.id}/buildRuns?sort=-number&limit=${recent}`, recent)]);
-    return output({ product, workflows: workflows.data, recentBuildRuns: runs.data });
+    return output({ enabled: true, product, workflows: workflows.data, recentBuildRuns: runs.data });
   });
   server.registerTool('xcode_cloud_build_run', {
     description: 'Read one Xcode Cloud build run with each action\'s result and, for failed actions, the reported issues and failing tests.',
@@ -289,7 +291,7 @@ export function createServer(service: ConnectService, configPath?: string): McpS
   server.registerTool('bundle_id_capabilities', {
     description: 'List the capabilities enabled on one App ID.',
     inputSchema: z.object({ account: z.string(), bundleId: idSchema }).strict(), annotations: read,
-  }, async ({ account, bundleId }) => output(await service.api(account).list(`/v1/bundleIds/${bundleId}/bundleIdCapabilities?limit=200`, 2000)));
+  }, async ({ account, bundleId }) => output(await service.api(account).list(`/v1/bundleIds/${bundleId}/bundleIdCapabilities`, 2000)));
   server.registerTool('custom_product_pages_list', {
     description: 'List Custom Product Pages of an app with their versions and states. Localization IDs come from custom_product_page_localizations.',
     inputSchema: z.object({ account: z.string(), appId: idSchema }).strict(), annotations: read,
@@ -439,9 +441,16 @@ export function createServer(service: ConnectService, configPath?: string): McpS
     return output(JSON.parse((await api.download(path, 'application/vnd.apple.xcode-metrics+json')).toString('utf8')));
   });
   server.registerTool('diagnostic_signatures_list', {
-    description: 'List crash-free hang and disk-write diagnostic signatures for one build.',
+    description: 'List crash-free hang and disk-write diagnostic signatures for one build. Builds without diagnostic data from devices return an empty list.',
     inputSchema: z.object({ account: z.string(), buildId: idSchema }).strict(), annotations: read,
-  }, async ({ account, buildId }) => output(await service.api(account).list(`/v1/builds/${buildId}/diagnosticSignatures?limit=200`, 2000)));
+  }, async ({ account, buildId }) => {
+    try { return output(await service.api(account).list(`/v1/builds/${buildId}/diagnosticSignatures?limit=200`, 2000)); }
+    catch (error) {
+      // Apple answers 404 NOT_FOUND for a build that has no diagnostic data yet, not an empty list.
+      if (!(error instanceof AppleError && error.status === 404)) throw error;
+      return output({ data: [], truncated: false, note: 'Apple has no diagnostic signatures for this build. Data appears after devices report hangs or disk writes; a wrong build ID gives the same answer.' });
+    }
+  });
   server.registerTool('metadata_sync_preview', {
     description: 'Compare all-language text with Apple and list what would change: name, subtitle, privacy, description, keywords, notes, URLs. Never writes. Apply by saving the same JSON to a file for the CLI metadata-sync --execute command.',
     inputSchema: z.object({ account: z.string(), appId: idSchema, versionId: idSchema, metadata: metadataFileSchema }).strict(), annotations: read,

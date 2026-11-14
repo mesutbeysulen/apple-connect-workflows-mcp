@@ -2,6 +2,19 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/); while the version is below 1.0, a minor release may contain breaking changes, which are marked **Breaking**.
 
+## 0.13.0 — 2026-11-14
+
+### Added
+- `smoke-read`: runs every read tool against one app, discovering IDs as it goes, and reports each as ok, error (forbidden, not found, rate limited) or skipped. The report keeps counts and field names only. Run against a live account with nine apps: 67 of 71 tools returned data, none failed after the fixes below.
+
+### Fixed
+Found by `smoke-read` on a live account, where Apple's API differs from its own OpenAPI document:
+- Export compliance: `/v1/apps/{id}/appEncryptionDeclarations` returns 404 PATH_ERROR. `encryption_declarations_list` and `encryption-declaration-create` now use `/v1/appEncryptionDeclarations?filter[app]=`.
+- `bundle_id_capabilities` and `capability-enable`/`capability-disable`: Apple rejects `limit` on this relationship; it is no longer sent.
+- `diagnostic_signatures_list` returns an empty list with a note for builds without diagnostic data, where Apple answers 404.
+- `xcode_cloud_overview` reports `enabled: false` for apps without Xcode Cloud instead of failing.
+- Contract tests and `api_read` now refuse requests the live API is known to reject, with the working alternative.
+
 ## 0.12.0 — 2026-11-14
 
 ### Added

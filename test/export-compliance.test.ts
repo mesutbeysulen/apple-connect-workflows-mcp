@@ -9,7 +9,7 @@ import { account, readOnly, res, fakeApi, assertContract } from './helpers.js';
 const answers = { appDescription: 'Encrypted local records', containsProprietaryCryptography: false,
   containsThirdPartyCryptography: true, availableOnFrenchStore: true };
 const base = {
-  '/v1/apps/123/appEncryptionDeclarations': [],
+  '/v1/appEncryptionDeclarations': [],
   '/v1/appEncryptionDeclarations/d/app': res('123', 'apps'),
   '/v1/appEncryptionDeclarations/d': res('d', 'appEncryptionDeclarations', { appEncryptionDeclarationState: 'APPROVED' }),
   '/v1/builds/b/app': res('123', 'apps'),
@@ -19,7 +19,7 @@ test('encryption declaration checks ownership and is idempotent', async () => {
   const created = await createEncryptionDeclaration({ account, appId: '123', ...answers }, f.api);
   assert.equal(created.status, 'created');
   assert.equal((f.writes()[0]!.body as any).data.relationships.app.data.id, '123');
-  const existing = fakeApi({ ...base, '/v1/apps/123/appEncryptionDeclarations': [res('d', 'appEncryptionDeclarations', answers)] });
+  const existing = fakeApi({ ...base, '/v1/appEncryptionDeclarations': [res('d', 'appEncryptionDeclarations', answers)] });
   assert.equal((await createEncryptionDeclaration({ account, appId: '123', ...answers }, existing.api)).status, 'exists');
   assert.equal(existing.writes().length, 0);
   await assert.rejects(createEncryptionDeclaration({ account: readOnly, appId: '123', ...answers }, f.api), /read-only/);

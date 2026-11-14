@@ -34,6 +34,9 @@ import * as prep from './release-prep.js';
 import { readMetadataFile, syncMetadata, syncScreenshots } from './bulk.js';
 import { uploadPreview, placePreview } from './creative-assets.js';
 import { applyApiPlan } from './api-plans.js';
+import { smokeRead } from './smoke.js';
+import { writeFileSync as writeFile } from 'node:fs';
+import { isAbsolute } from 'node:path';
 
 const options = {
   config: { type: 'string' }, plan: { type: 'string' }, digest: { type: 'string' }, account: { type: 'string' }, app: { type: 'string' },
@@ -506,6 +509,14 @@ const commands: Record<string, Handler> = {
   'webhook-ping': async (v, { account }) => { const a = required(v, 'app', 'webhook'); const acc = account(); return pingWebhook({ account: acc, appId: a.app, webhookId: a.webhook }, screenshotClient(acc)); },
   'webhook-delete': async (v, { account }) => { const a = required(v, 'app', 'webhook'); const acc = account(); return deleteWebhook({ account: acc, appId: a.app, webhookId: a.webhook }, screenshotClient(acc)); },
   'webhook-redeliver': async (v, { account }) => { const a = required(v, 'app', 'webhook', 'delivery'); const acc = account(); return redeliverWebhook({ account: acc, appId: a.app, webhookId: a.webhook, deliveryId: a.delivery }, screenshotClient(acc)); },
+  'smoke-read': async (v, { service }) => {
+    const report = await smokeRead(createServer(service), { account: required(v, 'account').account, appId: v.app });
+    if (v.out) {
+      if (!isAbsolute(v.out)) throw new Error('--out must be an absolute path.');
+      writeFile(v.out, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
+    }
+    return report;
+  },
   audit: async (v, { store }) => store.auditLog(Math.min(Math.max(Number(v.limit ?? 100) || 100, 1), 1000)),
   plan: async (v, { store }) => store.get(required(v, 'plan').plan),
   apply: async (v, { service }) => {

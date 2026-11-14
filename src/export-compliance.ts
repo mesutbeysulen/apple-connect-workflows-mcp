@@ -35,7 +35,7 @@ export async function createEncryptionDeclaration(input: { account: Account; app
   const { account, appId, ...answers } = input;
   requireWrite(account, appId);
   if (!validId(appId) || !answers.appDescription.trim() || Object.values(answers).some(value => typeof value !== 'string' && typeof value !== 'boolean')) throw new Error('Provide a valid app ID and all export-compliance answers.');
-  const current = await api.list(`/v1/apps/${appId}/appEncryptionDeclarations?limit=200`, 2000);
+  const current = await api.list(`/v1/appEncryptionDeclarations?filter[app]=${appId}&limit=200`, 2000);
   if (current.truncated) throw new Error('Incomplete encryption declaration list; refusing to create a duplicate.');
   const match = current.data.find(row => Object.entries(answers).every(([field, value]) => row.attributes[field] === value));
   if (match) return { status: 'exists', id: match.id, state: match.attributes.appEncryptionDeclarationState };

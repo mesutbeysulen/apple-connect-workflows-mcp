@@ -1,13 +1,15 @@
 import type { Resource } from '../src/apple.js';
 import { AppleError } from '../src/apple.js';
 import type { Account } from '../src/config.js';
-import { matchEndpoint } from '../src/catalog.js';
+import { appleRejects, matchEndpoint } from '../src/catalog.js';
 import { checkSchema, requestSchema } from '../src/schema-check.js';
 
 /** Every call a test makes must exist in Apple's catalog, use known query parameters and match the request schema. */
 export function assertContract(method: string, path: string, body?: unknown): void {
   const endpoint = matchEndpoint(method, path);
   if (!endpoint) throw new Error(`Contract: ${method} ${path.split('?')[0]} is not an Apple endpoint`);
+  const rejected = appleRejects(method, path);
+  if (rejected) throw new Error(`Contract: ${method} ${path} is rejected by the live API. ${rejected}`);
   for (const key of new URL(path, 'https://x').searchParams.keys()) {
     if (!endpoint.filters?.includes(key)) throw new Error(`Contract: ${method} ${endpoint.path} has no query parameter ${key}`);
   }

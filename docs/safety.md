@@ -70,6 +70,8 @@ Every write attempt, allowed or denied, is recorded in the local audit log. Read
 
 ## What has and has not been verified
 
-Automated tests check every request the commands send against Apple's App Store Connect API 4.6 schema, and run a real MCP stdio session. They use mocked Apple responses. The server has not yet been run end to end against a live App Store Connect account. Start with read tools and a test app, and check results in App Store Connect.
+Automated tests check every request the commands send against Apple's App Store Connect API 4.6 schema, and run a real MCP stdio session with mocked Apple responses.
+
+Read tools have also been run against a live team account with nine apps (`smoke-read`): 67 of the 71 tools it drives returned real data without errors. The other four (Custom Product Page languages, Game Center versions, analytics reports, webhook deliveries) had no data to read on that account. That run found three places where the live API differs from Apple's schema; they are fixed, and contract tests now reject those requests. Write commands have not yet been run against a live account. Run `smoke-read` on your own account first, then try writes on a test app and check the results in App Store Connect.
 
 Where the schema is silent, behavior follows Apple's developer guides, for example win-back offer prices and Game Center image sizes. If Apple rejects a request that the schema allows, the command reports Apple's error unchanged; please open an issue with it.

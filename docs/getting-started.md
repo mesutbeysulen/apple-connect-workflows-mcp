@@ -13,7 +13,7 @@ This guide installs the server, adds an App Store Connect API key, connects an M
 From npm (recommended), pinned to a version:
 
 ```sh
-npx -y apple-connect-workflows-mcp@0.12.0 --help
+npx -y apple-connect-workflows-mcp@0.13.0 --help
 ```
 
 From source, when you want to read or change the code:
@@ -25,7 +25,7 @@ npm ci
 npm run build
 ```
 
-Below, `apple-connect-mcp` stands for `npx -y apple-connect-workflows-mcp@0.12.0`, or `node /absolute/path/to/dist/cli.js` for a source checkout.
+Below, `apple-connect-mcp` stands for `npx -y apple-connect-workflows-mcp@0.13.0`, or `node /absolute/path/to/dist/cli.js` for a source checkout.
 
 ## 2. Add an API key
 
@@ -48,7 +48,14 @@ Check the connection:
 apple-connect-mcp doctor --config "$HOME/.apple-connect-mcp/config.json"
 ```
 
-`doctor` only proves that the apps list can be read; other operations may need more API roles.
+`doctor` only proves that the apps list can be read; other operations may need more API roles. For a full read check, run every read tool against one app; nothing is changed:
+
+```sh
+apple-connect-mcp smoke-read --config "$HOME/.apple-connect-mcp/config.json" \
+  --account main --app 1234567890 --out /absolute/path/smoke-report.json
+```
+
+The report lists each tool as `ok`, `error` (with `forbidden` meaning the key's role lacks access) or `skipped` (nothing to read, such as no subscriptions). It keeps counts and field names, never field values.
 
 ### The config file
 
@@ -84,14 +91,14 @@ Claude Code:
 
 ```sh
 claude mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.12.0 serve
+  npx -y apple-connect-workflows-mcp@0.13.0 serve
 ```
 
 Codex CLI:
 
 ```sh
 codex mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.12.0 serve
+  npx -y apple-connect-workflows-mcp@0.13.0 serve
 ```
 
 Clients that use a JSON config:
@@ -101,7 +108,7 @@ Clients that use a JSON config:
   "mcpServers": {
     "apple-connect": {
       "command": "npx",
-      "args": ["-y", "apple-connect-workflows-mcp@0.12.0", "serve"],
+      "args": ["-y", "apple-connect-workflows-mcp@0.13.0", "serve"],
       "env": { "APPLE_CONNECT_CONFIG": "/absolute/path/config.json" }
     }
   }

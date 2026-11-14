@@ -22,13 +22,19 @@ async function all(api: Pick<CloudAPI, 'list'>, path: string): Promise<Resource[
   return rows.data;
 }
 /** The app's Xcode Cloud product; every workflow and build run hangs off it. */
-export async function cloudProduct(api: Pick<CloudAPI, 'get'>, appId: string): Promise<Resource> {
+/** The app's Xcode Cloud product, or undefined when Xcode Cloud was never set up for it. */
+export async function findCloudProduct(api: Pick<CloudAPI, 'get'>, appId: string): Promise<Resource | undefined> {
   if (!/^\d+$/.test(appId)) throw new Error('Invalid app ID.');
   try {
     const product = await api.get(`/v1/apps/${appId}/ciProduct`);
     if (product?.id) return product;
   } catch (error) { if (!(error instanceof AppleError && error.status === 404)) throw error; }
-  throw new Error('Xcode Cloud is not set up for this app. Set it up once in Xcode, then use these commands.');
+  return undefined;
+}
+export async function cloudProduct(api: Pick<CloudAPI, 'get'>, appId: string): Promise<Resource> {
+  const product = await findCloudProduct(api, appId);
+  if (!product) throw new Error('Xcode Cloud is not set up for this app. Set it up once in Xcode, then use these commands.');
+  return product;
 }
 async function ownedWorkflow(api: CloudAPI, appId: string, workflowId: string): Promise<Resource> {
   needIds(workflowId);

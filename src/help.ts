@@ -13,6 +13,7 @@ export const TOPICS: HelpTopic[] = [
   { id: 'core', title: 'Core', summary: 'Start the MCP server, check accounts, and run reviewed metadata plans.',
     commands: `  serve                         Start stdio MCP (default)
   doctor                        Check configured accounts against Apple
+  smoke-read --account NAME [--app ID] [--out /absolute/report.json]  Run every read tool against Apple and report status, counts and field names (no writes)
   plan --plan ID                Print the exact saved plan and digest
   apply --plan ID --digest HASH  Execute this reviewed plan (requires writes enabled)` },
   { id: 'app-setup', title: 'App setup', summary: 'Bundle IDs, app information, categories, age rating, availability, versions, languages, review details and export compliance.', note: "the app record itself is created in App Store Connect",
