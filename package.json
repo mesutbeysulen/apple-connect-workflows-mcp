@@ -1,6 +1,6 @@
 {
   "name": "apple-connect-workflows-mcp",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "publishConfig": {
     "access": "public"
   },
@@ -21,12 +21,14 @@
   "homepage": "https://github.com/mesutbeysulen/apple-connect-workflows-mcp#readme",
   "bugs": "https://github.com/mesutbeysulen/apple-connect-workflows-mcp/issues",
   "files": [
-    "dist",
-    "catalog",
-    "README.md",
     "AGENTS.md",
+    "CHANGELOG.md",
     "LICENSE",
-    "config.example.json"
+    "README.md",
+    "catalog",
+    "config.example.json",
+    "dist",
+    "docs/*.md"
   ],
   "engines": {
     "node": ">=24.0.0"
@@ -41,7 +43,8 @@
     "test": "npm run build && tsx --test test/*.test.ts",
     "start": "node dist/cli.js serve",
     "dev": "tsx src/cli.ts serve",
-    "catalog": "node scripts/build-catalog.mjs"
+    "catalog": "node scripts/build-catalog.mjs",
+    "docs": "node scripts/build-docs.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.4.0",

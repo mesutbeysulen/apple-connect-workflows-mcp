@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
@@ -16,6 +16,9 @@ test('real stdio handshake lists workflows, returns accounts and rejects invalid
     await client.connect(transport);
     const listing = await client.listTools();
     assert(listing.tools.length >= 55);
+    // docs/mcp-tools.md must list exactly the tools the server registers.
+    const documented = [...readFileSync(resolve('docs/mcp-tools.md'), 'utf8').matchAll(/^\| `([a-z_]+)` \|/gm)].map(m => m[1]).sort();
+    assert.deepEqual(documented, listing.tools.map(t => t.name).sort(), 'docs/mcp-tools.md is out of date; run npm run build && npm run docs');
     assert(listing.tools.some(t => t.name === 'product_versions_list'));
     assert(listing.tools.some(t => t.name === 'product_version_localizations'));
     assert(listing.tools.some(t => t.name === 'workflow_apply' && t.annotations?.destructiveHint === true));
