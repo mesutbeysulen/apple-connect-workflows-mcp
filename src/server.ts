@@ -202,6 +202,24 @@ export function createServer(service: ConnectService, configPath?: string): McpS
     const prefix = kind === 'iap' ? 'inAppPurchaseVersions' : 'subscriptionVersions';
     return output(await service.api(account).list(`/v1/${prefix}/${versionId}/images?limit=200`, 2000));
   });
+  server.registerTool('game_center_overview', {
+    description: 'Show whether Game Center is enabled for an app, with its leaderboards, achievements (points and archived state) and which are released.',
+    inputSchema: z.object({ account: z.string(), appId: idSchema }).strict(), annotations: read,
+  }, async ({ account, appId }) => {
+    const api = service.api(account);
+    let detail;
+    try { detail = await api.get(`/v1/apps/${appId}/gameCenterDetail`); } catch (error) { if (!(error instanceof Error && /HTTP 404/.test(error.message))) throw error; }
+    if (!detail) return output({ enabled: false });
+    const [leaderboards, achievements, leaderboardReleases, achievementReleases] = await Promise.all([
+      api.list(`/v1/gameCenterDetails/${detail.id}/gameCenterLeaderboards?limit=200`, 2000), api.list(`/v1/gameCenterDetails/${detail.id}/gameCenterAchievements?limit=200`, 2000),
+      api.list(`/v1/gameCenterDetails/${detail.id}/leaderboardReleases?limit=200&include=gameCenterLeaderboard`, 2000), api.list(`/v1/gameCenterDetails/${detail.id}/achievementReleases?limit=200&include=gameCenterAchievement`, 2000)]);
+    const points = achievements.data.filter(row => row.attributes.archived !== true).reduce((sum, row) => sum + Number(row.attributes.points ?? 0), 0);
+    return output({ enabled: true, gameCenterId: detail.id, leaderboards, achievements, achievementPoints: { used: points, max: 1000 }, leaderboardReleases, achievementReleases });
+  });
+  server.registerTool('game_center_localizations', {
+    description: 'List the languages of one leaderboard or achievement.',
+    inputSchema: z.object({ account: z.string(), kind: z.enum(['leaderboard', 'achievement']), id: idSchema }).strict(), annotations: read,
+  }, async ({ account, kind, id }) => output(await service.api(account).list(`/v1/${kind === 'leaderboard' ? 'gameCenterLeaderboards' : 'gameCenterAchievements'}/${id}/localizations?limit=200`, 2000)));
   server.registerTool('users_list', {
     description: 'List team members with roles and whether they see all apps. Contains names and emails; treat as personal data.',
     inputSchema: z.object({ account: z.string() }).strict(), annotations: read,

@@ -23,6 +23,7 @@ import { setIntroOffer, deleteIntroOffer } from './offers.js';
 import * as extras from './commerce-extras.js';
 import * as marketing from './marketing.js';
 import * as team from './team-signing.js';
+import * as gc from './game-center.js';
 import { createWebhook, deleteWebhook, pingWebhook, redeliverWebhook, setWebhookEnabled, webhookReceiver, webhookSecret } from './webhooks.js';
 import { setupKey } from './key-setup.js';
 import * as prep from './release-prep.js';
@@ -104,6 +105,18 @@ const HELP = `apple-connect-mcp <command> [--config /absolute/config.json]
                   --placement-type TYPE [--placement-group GROUP]
   marketing-order --account NAME --app ID --target cpp|experiment --localization ID --placement-group GROUP --order ID1,ID2,...
   marketing-submit --account NAME --app ID --kind cpp|experiment|event --id ID
+
+ Game Center
+  gc-enable --account NAME --app ID [--version ID]
+  gc-leaderboard-create --account NAME --app ID --vendor-id ID --name REFERENCE --formatter INTEGER --sort DESC|ASC --submission BEST_SCORE|MOST_RECENT_SCORE
+                        [--range-start N] [--range-end N] [--visibility SHOW_FOR_ALL|HIDE_FOR_ALL]
+  gc-leaderboard-update --account NAME --app ID --leaderboard ID [--name REFERENCE] [--formatter F] [--sort S] [--submission S] [--range-start N] [--range-end N] [--visibility V] [--archived true|false]
+  gc-leaderboard-localize --account NAME --app ID --leaderboard ID --locale tr [--title TEXT] [--description TEXT] [--suffix TEXT] [--suffix-singular TEXT]
+  gc-achievement-create --account NAME --app ID --vendor-id ID --name REFERENCE --points 10 --show-before-earned true|false --repeatable true|false
+  gc-achievement-update --account NAME --app ID --achievement ID [--name REFERENCE] [--points N] [--show-before-earned B] [--repeatable B] [--archived B]
+  gc-achievement-localize --account NAME --app ID --achievement ID --locale tr [--title TEXT] [--before TEXT] [--after TEXT]
+  gc-image-upload --account NAME --app ID (--leaderboard ID | --achievement ID) --locale tr --file /absolute/image.png
+  gc-release --account NAME --app ID (--leaderboard ID | --achievement ID)
 
  Header and Search Results (creative assets, iOS 27 / iPadOS 27 or later)
   creative-upload --account NAME --app ID --placements header,search --file /absolute/asset.png|.mov
@@ -214,7 +227,7 @@ const options = {
   submission: { type: 'string' }, item: { type: 'string' }, state: { type: 'string' }, 'feedback-email': { type: 'string' }, 'public-link': { type: 'boolean' }, feedback: { type: 'boolean' }, emails: { type: 'string' }, tester: { type: 'string' }, review: { type: 'string' }, text: { type: 'string' }, identifier: { type: 'string' }, individual: { type: 'boolean' },
   placements: { type: 'string' }, 'preview-frame': { type: 'string' }, asset: { type: 'string' }, images: { type: 'string' }, videos: { type: 'string' }, video: { type: 'string' }, replace: { type: 'boolean' }, placement: { type: 'string' },
   'version-string': { type: 'string' }, 'product-id': { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, period: { type: 'string' }, 'group-level': { type: 'string' }, iap: { type: 'string' }, subscription: { type: 'string' }, locale: { type: 'string' }, description: { type: 'string' }, kind: { type: 'string' }, product: { type: 'string' }, 'custom-app-name': { type: 'string' },
-  territory: { type: 'string' }, roles: { type: 'string' }, 'all-apps': { type: 'boolean' }, apps: { type: 'string' }, provisioning: { type: 'string' }, user: { type: 'string' }, invitation: { type: 'string' }, udid: { type: 'string' }, device: { type: 'string' }, status: { type: 'string' }, bundle: { type: 'string' }, capability: { type: 'string' }, csr: { type: 'string' }, certificate: { type: 'string' }, certificates: { type: 'string' }, devices: { type: 'string' }, 'all-devices': { type: 'boolean' }, profile: { type: 'string' }, page: { type: 'string' }, 'page-version': { type: 'string' }, visible: { type: 'string' }, 'deep-link': { type: 'string' }, badge: { type: 'string' }, purpose: { type: 'string' }, priority: { type: 'string' }, 'purchase-requirement': { type: 'string' }, publish: { type: 'string' }, start: { type: 'string' }, end: { type: 'string' }, event: { type: 'string' }, 'event-name': { type: 'string' }, 'short-description': { type: 'string' }, 'long-description': { type: 'string' }, experiment: { type: 'string' }, traffic: { type: 'string' }, started: { type: 'string' }, treatment: { type: 'string' }, 'icon-name': { type: 'string' }, target: { type: 'string' }, id: { type: 'string' }, all: { type: 'boolean' }, 'offer-code': { type: 'string' }, prices: { type: 'string' }, eligibility: { type: 'string' }, 'offer-eligibility': { type: 'string' }, count: { type: 'string' }, expires: { type: 'string' }, environment: { type: 'string' }, 'custom-code': { type: 'string' }, 'visible-all': { type: 'string' }, enabled: { type: 'string' }, promoted: { type: 'string' }, 'interrupt-purchases': { type: 'string' }, 'renewal-rate': { type: 'string' }, testers: { type: 'string' }, 'offer-mode': { type: 'string' }, duration: { type: 'string' }, periods: { type: 'string' }, 'end-date': { type: 'string' }, offer: { type: 'string' }, 'region-code': { type: 'string' }, price: { type: 'string' }, 'start-date': { type: 'string' }, 'preserve-current-price': { type: 'boolean' },
+  territory: { type: 'string' }, 'vendor-id': { type: 'string' }, formatter: { type: 'string' }, sort: { type: 'string' }, 'range-start': { type: 'string' }, 'range-end': { type: 'string' }, visibility: { type: 'string' }, archived: { type: 'string' }, leaderboard: { type: 'string' }, title: { type: 'string' }, suffix: { type: 'string' }, 'suffix-singular': { type: 'string' }, achievement: { type: 'string' }, points: { type: 'string' }, 'show-before-earned': { type: 'string' }, repeatable: { type: 'string' }, before: { type: 'string' }, after: { type: 'string' }, roles: { type: 'string' }, 'all-apps': { type: 'boolean' }, apps: { type: 'string' }, provisioning: { type: 'string' }, user: { type: 'string' }, invitation: { type: 'string' }, udid: { type: 'string' }, device: { type: 'string' }, status: { type: 'string' }, bundle: { type: 'string' }, capability: { type: 'string' }, csr: { type: 'string' }, certificate: { type: 'string' }, certificates: { type: 'string' }, devices: { type: 'string' }, 'all-devices': { type: 'boolean' }, profile: { type: 'string' }, page: { type: 'string' }, 'page-version': { type: 'string' }, visible: { type: 'string' }, 'deep-link': { type: 'string' }, badge: { type: 'string' }, purpose: { type: 'string' }, priority: { type: 'string' }, 'purchase-requirement': { type: 'string' }, publish: { type: 'string' }, start: { type: 'string' }, end: { type: 'string' }, event: { type: 'string' }, 'event-name': { type: 'string' }, 'short-description': { type: 'string' }, 'long-description': { type: 'string' }, experiment: { type: 'string' }, traffic: { type: 'string' }, started: { type: 'string' }, treatment: { type: 'string' }, 'icon-name': { type: 'string' }, target: { type: 'string' }, id: { type: 'string' }, all: { type: 'boolean' }, 'offer-code': { type: 'string' }, prices: { type: 'string' }, eligibility: { type: 'string' }, 'offer-eligibility': { type: 'string' }, count: { type: 'string' }, expires: { type: 'string' }, environment: { type: 'string' }, 'custom-code': { type: 'string' }, 'visible-all': { type: 'string' }, enabled: { type: 'string' }, promoted: { type: 'string' }, 'interrupt-purchases': { type: 'string' }, 'renewal-rate': { type: 'string' }, testers: { type: 'string' }, 'offer-mode': { type: 'string' }, duration: { type: 'string' }, periods: { type: 'string' }, 'end-date': { type: 'string' }, offer: { type: 'string' }, 'region-code': { type: 'string' }, price: { type: 'string' }, 'start-date': { type: 'string' }, 'preserve-current-price': { type: 'boolean' },
   vendor: { type: 'string' }, subtype: { type: 'string' }, frequency: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, out: { type: 'string' }, 'report-version': { type: 'string' }, access: { type: 'string' }, 'report-name': { type: 'string' }, granularity: { type: 'string' }, category: { type: 'string' },
   issuer: { type: 'string' }, p8: { type: 'string' }, 'key-id': { type: 'string' }, 'allow-app': { type: 'string' }, url: { type: 'string' }, events: { type: 'string' }, webhook: { type: 'string' }, delivery: { type: 'string' }, port: { type: 'string' }, limit: { type: 'string' },
   'display-type': { type: 'string' }, upload: { type: 'string' }, 'timeout-minutes': { type: 'string' }, 'interval-seconds': { type: 'string' }, 'older-than-hours': { type: 'string' }, 'manual-checks': { type: 'string' },
@@ -545,6 +558,49 @@ const commands: Record<string, Handler> = {
   },
   'profile-download': async (v, { account }) => { const a = required(v, 'profile', 'out'); return team.downloadProfile({ profileId: a.profile, out: a.out }, screenshotClient(account())); },
   'profile-delete': async (v, { account }) => { const a = required(v, 'profile'); return team.deleteProfile({ account: account(), profileId: a.profile }, screenshotClient(account())); },
+  'gc-enable': async (v, { account }) => { const a = required(v, 'app'); const acc = account(); return gc.enableGameCenter({ account: acc, appId: a.app, versionId: v.version }, screenshotClient(acc)); },
+  'gc-leaderboard-create': async (v, { account }) => {
+    const a = required(v, 'app', 'vendor-id', 'name', 'formatter', 'sort', 'submission');
+    const acc = account();
+    return gc.createLeaderboard({ account: acc, appId: a.app, vendorIdentifier: a['vendor-id'], referenceName: a.name, formatter: a.formatter, scoreSortType: a.sort, submissionType: a.submission, scoreRangeStart: v['range-start'], scoreRangeEnd: v['range-end'], visibility: v.visibility }, screenshotClient(acc));
+  },
+  'gc-leaderboard-update': async (v, { account }) => {
+    const a = required(v, 'app', 'leaderboard');
+    const acc = account();
+    return gc.updateLeaderboard({ account: acc, appId: a.app, leaderboardId: a.leaderboard, referenceName: v.name, formatter: v.formatter, scoreSortType: v.sort, submissionType: v.submission, scoreRangeStart: v['range-start'], scoreRangeEnd: v['range-end'], visibility: v.visibility, archived: yesNo(v.archived, '--archived') }, screenshotClient(acc));
+  },
+  'gc-leaderboard-localize': async (v, { account }) => {
+    const a = required(v, 'app', 'leaderboard', 'locale');
+    const acc = account();
+    return gc.localizeLeaderboard({ account: acc, appId: a.app, leaderboardId: a.leaderboard, locale: a.locale, name: v.title, description: v.description, formatterSuffix: v.suffix, formatterSuffixSingular: v['suffix-singular'] }, screenshotClient(acc));
+  },
+  'gc-achievement-create': async (v, { account }) => {
+    const a = required(v, 'app', 'vendor-id', 'name', 'points', 'show-before-earned', 'repeatable');
+    const acc = account();
+    return gc.createAchievement({ account: acc, appId: a.app, vendorIdentifier: a['vendor-id'], referenceName: a.name, points: Number(a.points), showBeforeEarned: yesNo(a['show-before-earned'], '--show-before-earned')!, repeatable: yesNo(a.repeatable, '--repeatable')! }, screenshotClient(acc));
+  },
+  'gc-achievement-update': async (v, { account }) => {
+    const a = required(v, 'app', 'achievement');
+    const acc = account();
+    return gc.updateAchievement({ account: acc, appId: a.app, achievementId: a.achievement, referenceName: v.name, points: v.points === undefined ? undefined : Number(v.points), showBeforeEarned: yesNo(v['show-before-earned'], '--show-before-earned'), repeatable: yesNo(v.repeatable, '--repeatable'), archived: yesNo(v.archived, '--archived') }, screenshotClient(acc));
+  },
+  'gc-achievement-localize': async (v, { account }) => {
+    const a = required(v, 'app', 'achievement', 'locale');
+    const acc = account();
+    return gc.localizeAchievement({ account: acc, appId: a.app, achievementId: a.achievement, locale: a.locale, name: v.title, beforeEarnedDescription: v.before, afterEarnedDescription: v.after }, screenshotClient(acc));
+  },
+  'gc-image-upload': async (v, { account }) => {
+    const a = required(v, 'app', 'locale', 'file');
+    if (!!v.leaderboard === !!v.achievement) throw new Error('Pass exactly one of --leaderboard or --achievement.');
+    const acc = account();
+    return gc.uploadGameCenterImage({ account: acc, appId: a.app, kind: v.leaderboard ? 'leaderboard' : 'achievement', itemId: (v.leaderboard ?? v.achievement)!, locale: a.locale, filePath: a.file }, screenshotClient(acc));
+  },
+  'gc-release': async (v, { account }) => {
+    const a = required(v, 'app');
+    if (!!v.leaderboard === !!v.achievement) throw new Error('Pass exactly one of --leaderboard or --achievement.');
+    const acc = account();
+    return gc.releaseGameCenterItem({ account: acc, appId: a.app, kind: v.leaderboard ? 'leaderboard' : 'achievement', itemId: (v.leaderboard ?? v.achievement)! }, screenshotClient(acc));
+  },
   'intro-offer-delete': async (v, { account }) => { const a = required(v, 'app', 'subscription', 'offer'); const acc = account(); return deleteIntroOffer({ account: acc, appId: a.app, subscriptionId: a.subscription, offerId: a.offer }, screenshotClient(acc)); },
   'analytics-request': async (v, { account }) => {
     const a = required(v, 'app');
@@ -590,7 +646,7 @@ const WRITES: Record<string, Capability> = {
   'creative-submit': 'review', 'release-submit': 'review', 'release-publish': 'release',
   'iap-create': 'commercial', 'subscription-group-create': 'commercial', 'subscription-create': 'commercial', 'product-localize': 'commercial',
   'product-version-create': 'commercial', 'product-version-localize': 'commercial', 'product-version-image-upload': 'commercial',
-  'app-price-set': 'commercial', 'iap-price-set': 'commercial', 'subscription-price-set': 'commercial', 'intro-offer-set': 'commercial', 'intro-offer-delete': 'commercial', 'product-availability-set': 'commercial', 'promo-offer-create': 'commercial', 'promo-offer-delete': 'commercial', 'offer-code-create': 'commercial', 'offer-code-activate': 'commercial', 'offer-code-deactivate': 'commercial', 'offer-codes-generate': 'commercial', 'offer-custom-code-create': 'commercial', 'promoted-purchase-set': 'commercial', 'promoted-purchase-delete': 'commercial', 'product-review-screenshot-upload': 'upload', 'sandbox-tester-update': 'admin', 'sandbox-history-clear': 'admin', 'cpp-create': 'upload', 'cpp-update': 'upload', 'cpp-delete': 'upload', 'cpp-localize': 'upload', 'event-create': 'upload', 'event-update': 'upload', 'event-delete': 'upload', 'event-localize': 'upload', 'experiment-create': 'upload', 'experiment-update': 'release', 'treatment-create': 'upload', 'treatment-localize': 'upload', 'marketing-place': 'upload', 'marketing-order': 'upload', 'marketing-submit': 'review', 'user-invite': 'admin', 'user-update': 'admin', 'user-remove': 'admin', 'invitation-cancel': 'admin', 'device-register': 'admin', 'device-update': 'admin', 'capability-enable': 'admin', 'capability-disable': 'admin', 'certificate-create': 'admin', 'certificate-revoke': 'admin', 'profile-create': 'admin', 'profile-delete': 'admin',
+  'app-price-set': 'commercial', 'iap-price-set': 'commercial', 'subscription-price-set': 'commercial', 'intro-offer-set': 'commercial', 'intro-offer-delete': 'commercial', 'product-availability-set': 'commercial', 'promo-offer-create': 'commercial', 'promo-offer-delete': 'commercial', 'offer-code-create': 'commercial', 'offer-code-activate': 'commercial', 'offer-code-deactivate': 'commercial', 'offer-codes-generate': 'commercial', 'offer-custom-code-create': 'commercial', 'promoted-purchase-set': 'commercial', 'promoted-purchase-delete': 'commercial', 'product-review-screenshot-upload': 'upload', 'sandbox-tester-update': 'admin', 'sandbox-history-clear': 'admin', 'cpp-create': 'upload', 'cpp-update': 'upload', 'cpp-delete': 'upload', 'cpp-localize': 'upload', 'event-create': 'upload', 'event-update': 'upload', 'event-delete': 'upload', 'event-localize': 'upload', 'experiment-create': 'upload', 'experiment-update': 'release', 'treatment-create': 'upload', 'treatment-localize': 'upload', 'marketing-place': 'upload', 'marketing-order': 'upload', 'marketing-submit': 'review', 'gc-enable': 'upload', 'gc-leaderboard-create': 'upload', 'gc-leaderboard-update': 'upload', 'gc-leaderboard-localize': 'upload', 'gc-achievement-create': 'upload', 'gc-achievement-update': 'upload', 'gc-achievement-localize': 'upload', 'gc-image-upload': 'upload', 'gc-release': 'release', 'user-invite': 'admin', 'user-update': 'admin', 'user-remove': 'admin', 'invitation-cancel': 'admin', 'device-register': 'admin', 'device-update': 'admin', 'capability-enable': 'admin', 'capability-disable': 'admin', 'certificate-create': 'admin', 'certificate-revoke': 'admin', 'profile-create': 'admin', 'profile-delete': 'admin',
   'analytics-request': 'admin', 'webhook-create': 'admin', 'webhook-enable': 'admin', 'webhook-disable': 'admin', 'webhook-ping': 'admin', 'webhook-delete': 'admin', 'webhook-redeliver': 'admin',
 };
 const DRY_RUN_UNLESS_EXECUTE = new Set(['user-invite', 'user-update', 'user-remove', 'certificate-create', 'certificate-revoke', 'product-availability-set', 'promo-offer-create', 'offer-code-create', 'offer-codes-generate', 'intro-offer-set', 'metadata-sync', 'screenshots-sync', 'availability-set', 'asset-cleanup', 'app-price-set', 'iap-price-set', 'subscription-price-set']);
