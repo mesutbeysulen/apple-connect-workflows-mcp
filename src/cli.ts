@@ -35,6 +35,7 @@ import { readMetadataFile, syncMetadata, syncScreenshots } from './bulk.js';
 import { uploadPreview, placePreview } from './creative-assets.js';
 import { applyApiPlan } from './api-plans.js';
 import { smokeRead } from './smoke.js';
+import { applyWorkflowPlan } from './workflow-mcp.js';
 import { writeFileSync as writeFile } from 'node:fs';
 import { isAbsolute } from 'node:path';
 
@@ -509,6 +510,11 @@ const commands: Record<string, Handler> = {
   'webhook-ping': async (v, { account }) => { const a = required(v, 'app', 'webhook'); const acc = account(); return pingWebhook({ account: acc, appId: a.app, webhookId: a.webhook }, screenshotClient(acc)); },
   'webhook-delete': async (v, { account }) => { const a = required(v, 'app', 'webhook'); const acc = account(); return deleteWebhook({ account: acc, appId: a.app, webhookId: a.webhook }, screenshotClient(acc)); },
   'webhook-redeliver': async (v, { account }) => { const a = required(v, 'app', 'webhook', 'delivery'); const acc = account(); return redeliverWebhook({ account: acc, appId: a.app, webhookId: a.webhook, deliveryId: a.delivery }, screenshotClient(acc)); },
+  // A person applies a plan an MCP client prepared; the child CLI run enforces policy, lease and audit.
+  'workflow-apply': async (v, { service }) => {
+    const a = required(v, 'plan', 'digest');
+    return applyWorkflowPlan(service, v.config ?? process.env.APPLE_CONNECT_CONFIG, a.plan, a.digest, 'cli');
+  },
   'smoke-read': async (v, { service }) => {
     const report = await smokeRead(createServer(service), { account: required(v, 'account').account, appId: v.app });
     if (v.out) {

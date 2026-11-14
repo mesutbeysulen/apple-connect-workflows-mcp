@@ -42,6 +42,7 @@ Start the MCP server, check accounts, and run reviewed metadata plans.
   smoke-read --account NAME [--app ID] [--out /absolute/report.json]  Run every read tool against Apple and report status, counts and field names (no writes)
   plan --plan ID                Print the exact saved plan and digest
   apply --plan ID --digest HASH  Execute this reviewed plan (requires writes enabled)
+  workflow-apply --plan ID --digest HASH  Run a plan an MCP client prepared with workflow_prepare (the applyInTerminal command)
 ```
 
 <a id="app-setup"></a>

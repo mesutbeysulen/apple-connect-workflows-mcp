@@ -15,7 +15,8 @@ export const TOPICS: HelpTopic[] = [
   doctor                        Check configured accounts against Apple
   smoke-read --account NAME [--app ID] [--out /absolute/report.json]  Run every read tool against Apple and report status, counts and field names (no writes)
   plan --plan ID                Print the exact saved plan and digest
-  apply --plan ID --digest HASH  Execute this reviewed plan (requires writes enabled)` },
+  apply --plan ID --digest HASH  Execute this reviewed plan (requires writes enabled)
+  workflow-apply --plan ID --digest HASH  Run a plan an MCP client prepared with workflow_prepare (the applyInTerminal command)` },
   { id: 'app-setup', title: 'App setup', summary: 'Bundle IDs, app information, categories, age rating, availability, versions, languages, review details and export compliance.', note: "the app record itself is created in App Store Connect",
     commands: `  bundle-id-create --account NAME --identifier com.example.app --name TEXT --platform IOS|MAC_OS|UNIVERSAL
   app-update --account NAME --app ID [--primary-locale tr] [--content-rights DOES_NOT_USE_THIRD_PARTY_CONTENT|USES_THIRD_PARTY_CONTENT]

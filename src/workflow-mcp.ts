@@ -96,7 +96,7 @@ export function registerWorkflowTools(server: McpServer, service: ConnectService
     inputSchema: z.object({ command: z.string(), args: OPTION_SCHEMA.default({}) }).strict(), annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, async ({ command, args }) => { validate(command, args, 'read'); return output(await runCli(command, args, configPath)); });
   server.registerTool('workflow_prepare', {
-    description: 'Save an exact CLI write workflow as a 30-minute plan. Dry-run capable commands fetch a preview; other commands show exact inputs. No Apple write occurs.',
+    description: 'Save an exact CLI write workflow as a 30-minute plan. Dry-run capable commands fetch a preview; other commands show exact inputs. No Apple write occurs. Show the plan to the user; unless the account sets mcpApply, they run applyInTerminal themselves.',
     inputSchema: z.object({ command: z.string(), args: OPTION_SCHEMA }).strict(), annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, async ({ command, args }) => {
     validate(command, args, 'write');
@@ -108,38 +108,49 @@ export function registerWorkflowTools(server: McpServer, service: ConnectService
     const preview = DRY_RUN.has(command) ? await runCli(command, args, configPath) : { command, args, note: 'Input review only; this command has no dry run.' };
     const now = Date.now();
     const plan = service.store.createWorkflowPlan({ command, args, account: accountName, identity: accountIdentity(account), files, createdAt: now, expiresAt: now + 30 * 60_000, preview });
-    return output(plan);
+    return output({ ...plan, mcpApply: account.mcpApply, applyInTerminal: terminalCommand(plan.id, plan.digest, configPath) });
   });
   server.registerTool('workflow_plan_get', {
     description: 'Inspect the saved workflow, preview, digest, expiry and status before applying it.',
     inputSchema: z.object({ planId: z.string().uuid() }).strict(), annotations: { readOnlyHint: true },
   }, async ({ planId }) => output(service.store.workflowPlan(planId)));
   server.registerTool('workflow_apply', {
-    description: 'Execute a saved workflow once with its exact digest. May upload, delete, submit, change prices, or publish. The CLI enforces local policy, leases and audit records.',
+    description: 'Execute a saved workflow once with its exact digest. May upload, delete, submit, change prices, or publish. Refused unless the account sets mcpApply: true; otherwise give the user applyInTerminal from workflow_prepare. The CLI enforces local policy, leases and audit records.',
     inputSchema: z.object({ planId: z.string().uuid(), digest: z.string().regex(/^[a-f0-9]{64}$/) }).strict(), annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
-  }, async ({ planId, digest }) => {
-    const plan = service.store.workflowPlan(planId);
-    if (plan.digest !== digest) throw new Error('Workflow digest mismatch.');
-    if (plan.status !== 'pending') throw new Error(`Workflow status is ${plan.status}; create a new plan to retry.`);
-    if (Date.now() > plan.body.expiresAt) throw new Error('Workflow plan expired.');
-    const currentConfig = loadConfig(configPath);
-    const account = currentConfig.accounts.find(item => item.name === plan.body.account);
-    if (!account) throw new Error('Planned account is no longer configured.');
-    if (accountIdentity(account) !== plan.body.identity) throw new Error('Account identity changed.');
-    requireCapability(currentConfig, userInfo().username, plan.body.account, capability(plan.body.command)!);
-    if (account.readOnly) throw new Error('Account is read-only.');
-    const current = await inputHashes(plan.body.args);
-    if (JSON.stringify(current) !== JSON.stringify(plan.body.files)) throw new Error('Input file or directory changed; prepare a new plan.');
-    if (!service.store.claimWorkflowPlan(planId)) throw new Error('Workflow already claimed.');
-    try {
-      const result = await runCli(plan.body.command, plan.body.args, configPath, true);
-      const partial = (result as { ok?: unknown } | null)?.ok === false;
-      service.store.finishWorkflowPlan(planId, partial ? 'uncertain' : 'completed', result, partial ? 'CLI reported partial failure.' : null);
-      return output(service.store.workflowPlan(planId));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'CLI failed';
-      service.store.finishWorkflowPlan(planId, 'uncertain', null, message);
-      throw error;
-    }
-  });
+  }, async ({ planId, digest }) => output(await applyWorkflowPlan(service, configPath, planId, digest, 'mcp')));
+}
+
+/** The command a person runs to apply a reviewed plan when MCP clients may not. */
+export function terminalCommand(planId: string, digest: string, configPath?: string): string {
+  return `apple-connect-mcp workflow-apply --plan ${planId} --digest ${digest}${configPath ? ` --config ${JSON.stringify(configPath)}` : ''}`;
+}
+/**
+ * Runs a reviewed plan once. From MCP it needs the account's mcpApply; from the terminal the person running
+ * the command is the approval. Both re-check the digest, expiry, account identity, policy and input files.
+ */
+export async function applyWorkflowPlan(service: ConnectService, configPath: string | undefined, planId: string, digest: string, via: 'mcp' | 'cli') {
+  const plan = service.store.workflowPlan(planId);
+  if (plan.digest !== digest) throw new Error('Workflow digest mismatch.');
+  if (plan.status !== 'pending') throw new Error(`Workflow status is ${plan.status}; create a new plan to retry.`);
+  if (Date.now() > plan.body.expiresAt) throw new Error('Workflow plan expired.');
+  const currentConfig = loadConfig(configPath);
+  const account = currentConfig.accounts.find(item => item.name === plan.body.account);
+  if (!account) throw new Error('Planned account is no longer configured.');
+  if (via === 'mcp' && !account.mcpApply) throw new Error(`MCP clients may not apply plans for account ${account.name}. Ask the user to review the plan and run in a terminal: ${terminalCommand(planId, digest, configPath)}. To allow MCP clients to apply plans, set "mcpApply": true on the account.`);
+  if (accountIdentity(account) !== plan.body.identity) throw new Error('Account identity changed.');
+  requireCapability(currentConfig, userInfo().username, plan.body.account, capability(plan.body.command)!);
+  if (account.readOnly) throw new Error('Account is read-only.');
+  const current = await inputHashes(plan.body.args);
+  if (JSON.stringify(current) !== JSON.stringify(plan.body.files)) throw new Error('Input file or directory changed; prepare a new plan.');
+  if (!service.store.claimWorkflowPlan(planId)) throw new Error('Workflow already claimed.');
+  try {
+    const result = await runCli(plan.body.command, plan.body.args, configPath, true);
+    const partial = (result as { ok?: unknown } | null)?.ok === false;
+    service.store.finishWorkflowPlan(planId, partial ? 'uncertain' : 'completed', result, partial ? 'CLI reported partial failure.' : null);
+    return service.store.workflowPlan(planId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'CLI failed';
+    service.store.finishWorkflowPlan(planId, 'uncertain', null, message);
+    throw error;
+  }
 }

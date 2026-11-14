@@ -17,12 +17,12 @@ A model must not be able to turn its own guess into a write. Three plan types bi
 | Plan | Prepare | Inspect | Apply |
 | --- | --- | --- | --- |
 | Metadata changes across languages | `metadata_plan` | `plan_get` | CLI `apply --plan ID --digest HASH`, or `workflow_apply` for the `apply` command |
-| Any CLI write from an MCP client | `workflow_prepare` | `workflow_plan_get` | `workflow_apply` with the plan ID and digest |
+| Any CLI write from an MCP client | `workflow_prepare` | `workflow_plan_get` | CLI `workflow-apply --plan ID --digest HASH`, or `workflow_apply` when the account sets `mcpApply` |
 | Any catalog endpoint without a command | `api_write_plan` | `api_plan_get` | CLI `api-apply --plan ID --digest HASH` (needs `genericWrites: true`) |
 
 Each plan is stored locally with a SHA-256 digest of its exact contents, expires after 30 minutes and runs once. Files and folders a plan uses are hashed and checked again before it runs. `api_write_plan` checks the request against Apple's OpenAPI schema and refuses credential fields.
 
-`workflow_apply` lets an MCP client run a plan it prepared. Whether that needs a human's approval depends on your MCP client's tool-approval setting; the digest only proves that the plan was not changed after it was shown. If you want a person to approve every write, require approval for `workflow_apply` in your client, or run writes from the terminal yourself.
+By default an MCP client cannot run the plans it prepares: `workflow_apply` refuses and returns the terminal command, so a person reviews the preview and runs `workflow-apply` themselves. Setting `"mcpApply": true` on an account lets the client run plans with `workflow_apply`; then whether a person approves each write depends on your MCP client's tool-approval setting, and the digest only proves that the plan was not changed after it was shown.
 
 ## Uncertain outcomes
 

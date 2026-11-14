@@ -16,6 +16,11 @@ export const accountSchema = z.object({
   allowedAppIds: z.array(z.string().regex(/^\d+$/)).default([]),
   /** Lets reviewed api-apply plans run. Off by default because a generic plan cannot prove which app it affects. */
   genericWrites: z.boolean().default(false),
+  /**
+   * Lets MCP clients run reviewed plans with workflow_apply. Off by default: a client can prepare and show
+   * a plan, and a person runs it in a terminal with workflow-apply.
+   */
+  mcpApply: z.boolean().default(false),
 }).strict().refine(a => a.keyType === 'individual' ? a.issuerId === undefined : a.issuerId !== undefined, 'Team keys need issuerId; individual keys must not set it.');
 export const CAPABILITIES = ['upload', 'review', 'release', 'commercial', 'admin'] as const;
 export type Capability = typeof CAPABILITIES[number];

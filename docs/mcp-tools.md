@@ -94,6 +94,6 @@
 | --- | --- |
 | `api_write_plan` | Prepare a reviewed plan for any catalog write without a dedicated command, such as Custom Product Pages, in-app events, offers, Game Center or Xcode Cloud. Validates against Apple's schema. Never writes to Apple. A human may run it with the CLI api-apply command; do not treat creating it as authorization to run it. |
 | `metadata_plan` | Prepare a local, persistent 30-minute metadata change plan with before/after values. Never writes to Apple. A human may execute the reviewed plan using the CLI apply command; do not treat plan creation as authorization to run it. |
-| `workflow_apply` | Execute a saved workflow once with its exact digest. May upload, delete, submit, change prices, or publish. The CLI enforces local policy, leases and audit records. |
-| `workflow_prepare` | Save an exact CLI write workflow as a 30-minute plan. Dry-run capable commands fetch a preview; other commands show exact inputs. No Apple write occurs. |
+| `workflow_apply` | Execute a saved workflow once with its exact digest. May upload, delete, submit, change prices, or publish. Refused unless the account sets mcpApply: true; otherwise give the user applyInTerminal from workflow_prepare. The CLI enforces local policy, leases and audit records. |
+| `workflow_prepare` | Save an exact CLI write workflow as a 30-minute plan. Dry-run capable commands fetch a preview; other commands show exact inputs. No Apple write occurs. Show the plan to the user; unless the account sets mcpApply, they run applyInTerminal themselves. |
 | `workflow_run` | Run an allowlisted CLI read/report workflow. sales-download and analytics-download may create a local report file. |

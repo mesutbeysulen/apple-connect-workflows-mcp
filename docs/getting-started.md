@@ -13,7 +13,7 @@ This guide installs the server, adds an App Store Connect API key, connects an M
 From npm (recommended), pinned to a version:
 
 ```sh
-npx -y apple-connect-workflows-mcp@0.16.0 --help
+npx -y apple-connect-workflows-mcp@0.17.0 --help
 ```
 
 From source, when you want to read or change the code:
@@ -25,7 +25,7 @@ npm ci
 npm run build
 ```
 
-Below, `apple-connect-mcp` stands for `npx -y apple-connect-workflows-mcp@0.16.0`, or `node /absolute/path/to/dist/cli.js` for a source checkout.
+Below, `apple-connect-mcp` stands for `npx -y apple-connect-workflows-mcp@0.17.0`, or `node /absolute/path/to/dist/cli.js` for a source checkout.
 
 ## 2. Add an API key
 
@@ -71,7 +71,8 @@ The report lists each tool as `ok`, `error` (with `forbidden` meaning the key's 
       "privateKeyPath": "/Users/you/.apple-connect-mcp/keys/AuthKey_ABCDEFGHIJ.p8",
       "readOnly": true,
       "allowedAppIds": [],
-      "genericWrites": false
+      "genericWrites": false,
+      "mcpApply": false
     }
   ]
 }
@@ -83,6 +84,7 @@ The report lists each tool as `ok`, `error` (with `forbidden` meaning the key's 
 | `readOnly` | `true` blocks every write for this account. |
 | `allowedAppIds` | Apps this account may change. Writes to any other app are refused. |
 | `genericWrites` | Allows reviewed `api-apply` plans for endpoints without a dedicated command. Off by default. |
+| `mcpApply` | Lets MCP clients run reviewed plans with `workflow_apply`. Off by default: the client prepares a plan and you run it in a terminal. |
 | `operators` | Optional, top level: limits writes by operating-system user. See [Safety model](safety.md#local-operator-policy). |
 
 ## 3. Connect an MCP client
@@ -91,14 +93,14 @@ Claude Code:
 
 ```sh
 claude mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.16.0 serve
+  npx -y apple-connect-workflows-mcp@0.17.0 serve
 ```
 
 Codex CLI:
 
 ```sh
 codex mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.16.0 serve
+  npx -y apple-connect-workflows-mcp@0.17.0 serve
 ```
 
 Clients that use a JSON config:
@@ -108,7 +110,7 @@ Clients that use a JSON config:
   "mcpServers": {
     "apple-connect": {
       "command": "npx",
-      "args": ["-y", "apple-connect-workflows-mcp@0.16.0", "serve"],
+      "args": ["-y", "apple-connect-workflows-mcp@0.17.0", "serve"],
       "env": { "APPLE_CONNECT_CONFIG": "/absolute/path/config.json" }
     }
   }
@@ -147,6 +149,12 @@ apple-connect-mcp version-localize --account main --app 1234567890 \
   --version VERSION_ID --locale en-US --whats-new "Bug fixes."
 ```
 
-From an MCP client, the same command goes through a reviewed plan: `workflow_prepare` saves it with a digest, `workflow_plan_get` shows it, and `workflow_apply` runs that exact plan once. See [Safety model](safety.md#plans-and-digests).
+From an MCP client, the same command goes through a reviewed plan. `workflow_prepare` saves it with a digest and returns a preview and an `applyInTerminal` command. Check the preview, then run that command yourself:
+
+```sh
+apple-connect-mcp workflow-apply --plan PLAN_ID --digest DIGEST
+```
+
+The plan runs once, exactly as shown. To let the MCP client run plans itself with `workflow_apply`, set `"mcpApply": true` on the account. See [Safety model](safety.md#plans-and-digests).
 
 For every command, run `apple-connect-mcp help` or read [CLI command reference](commands.md). To go from an empty app record to a live release, follow the [release checklist](release-checklist.md).

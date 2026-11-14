@@ -21,19 +21,19 @@ https://github.com/mesutbeysulen/apple-connect-workflows-mcp — install this MC
 Node.js 24 or newer. Pass the path to your `.p8` key, never its contents:
 
 ```sh
-npx -y apple-connect-workflows-mcp@0.16.0 key-setup \
+npx -y apple-connect-workflows-mcp@0.17.0 key-setup \
   --config "$HOME/.apple-connect-mcp/config.json" \
   --name main --issuer YOUR_ISSUER_UUID \
   --p8 /absolute/path/AuthKey_ABCDEFGHIJ.p8
 
-npx -y apple-connect-workflows-mcp@0.16.0 doctor --config "$HOME/.apple-connect-mcp/config.json"
+npx -y apple-connect-workflows-mcp@0.17.0 doctor --config "$HOME/.apple-connect-mcp/config.json"
 ```
 
 Register it with Claude Code (for Codex CLI, use `codex mcp add` with the same arguments):
 
 ```sh
 claude mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.16.0 serve
+  npx -y apple-connect-workflows-mcp@0.17.0 serve
 ```
 
 For individual keys, other clients, source installs and enabling writes, see [Getting started](docs/getting-started.md).
@@ -72,7 +72,7 @@ For individual keys, other clients, source installs and enabling writes, see [Ge
 - Accounts are read-only until you set `readOnly: false` and list the app in `allowedAppIds`.
 - Commands check that every ID belongs to the named app before writing.
 - Price, availability, team, signing and bulk changes preview first and write only with `--execute`.
-- From an MCP client, writes go through a saved plan with a SHA-256 digest that runs once (`workflow_prepare`, `workflow_plan_get`, `workflow_apply`). Require approval for `workflow_apply` in your client if a person should approve every write.
+- From an MCP client, writes go through a saved plan with a SHA-256 digest that runs once. The client prepares and shows it; you run it with `apple-connect-mcp workflow-apply`. Set `mcpApply: true` on an account to let the client apply plans itself.
 
 Details and limits are in the [safety model](docs/safety.md).
 

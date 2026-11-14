@@ -2,6 +2,15 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/); while the version is below 1.0, a minor release may contain breaking changes, which are marked **Breaking**.
 
+## 0.17.0 — 2026-11-14
+
+### Changed
+- **Breaking:** MCP clients can no longer apply plans by default. `workflow_apply` refuses unless the account sets `"mcpApply": true`, and returns the terminal command instead. Add `"mcpApply": true` to keep the previous behavior.
+- `workflow_prepare` returns `mcpApply` and `applyInTerminal`, the exact command to run the plan.
+
+### Added
+- `workflow-apply --plan ID --digest HASH` runs a plan an MCP client prepared, with the same digest, expiry, identity, policy and input-file checks as `workflow_apply`.
+
 ## 0.16.0 — 2026-11-14
 
 ### Fixed
