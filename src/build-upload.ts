@@ -22,7 +22,7 @@ const problems = (r: Resource) => {
   return Array.isArray(errors) && errors.length ? ` Apple errors: ${JSON.stringify(errors).slice(0, 800)}` : '';
 };
 
-async function inspectIpa(filePath: string): Promise<{ size: number; sha256: string }> {
+async function inspectIpa(filePath: string): Promise<{ size: number; sha256: string; md5: string }> {
   const lower = filePath.toLowerCase();
   if (!isAbsolute(filePath) || !(lower.endsWith('.ipa') || lower.endsWith('.pkg'))) throw new Error('Use an absolute .ipa or .pkg path.');
   const info = await stat(filePath);
@@ -33,14 +33,15 @@ async function inspectIpa(filePath: string): Promise<{ size: number; sha256: str
     await handle.read(magic, 0, 4, 0);
     if (lower.endsWith('.ipa') ? !magic.equals(Buffer.from([0x50,0x4b,0x03,0x04])) : !magic.equals(Buffer.from('xar!'))) throw new Error(lower.endsWith('.ipa') ? 'IPA must be a ZIP archive.' : 'PKG must be a xar archive.');
   } finally { await handle.close(); }
-  const hash = createHash('sha256');
-  for await (const chunk of createReadStream(filePath)) hash.update(chunk);
-  return { size: info.size, sha256: hash.digest('hex') };
+  const sha256 = createHash('sha256');
+  const md5 = createHash('md5');
+  for await (const chunk of createReadStream(filePath)) { sha256.update(chunk); md5.update(chunk); }
+  return { size: info.size, sha256: sha256.digest('hex'), md5: md5.digest('hex') };
 }
 
 /**
- * Reserves a build upload, journals it, streams the IPA to Apple's signed URLs and commits its SHA-256.
- * Refuses to open a second reservation for a version/build pair that already has a live upload.
+ * Reserves or recovers a build upload, journals it, streams the IPA to Apple's signed URLs and commits its MD5.
+ * Never opens a second reservation for a version/build pair that already has a live upload.
  */
 export async function uploadBuild(input: { account: Account; appId: string; version: string; build: string; filePath: string; platform?: string },
   api: BuildUploadAPI, fetcher: typeof fetch = fetch, store?: PlanStore): Promise<BuildUploadResult> {
@@ -54,6 +55,18 @@ export async function uploadBuild(input: { account: Account; appId: string; vers
   const previous = await api.list(`/v1/apps/${appId}/buildUploads?${query}`, 50);
   const live = previous.data.find(row => uploadState(row) !== 'FAILED');
   if (previous.truncated) throw new Error('Incomplete build upload list; refusing an uncertain duplicate reservation.');
+  if (live && uploadState(live) === 'AWAITING_UPLOAD') {
+    if (store?.hasBuild(live.id)) return resumeBuild(live.id, account, store, api, fetcher);
+    const files = await api.list(`/v1/buildUploads/${live.id}/buildUploadFiles?limit=200`, 200);
+    if (files.truncated || files.data.some(row => row.attributes.assetType === 'ASSET' && row.attributes.fileSize !== size)) {
+      throw new Error('Existing build upload has an incomplete or mismatched asset file; inspect it before continuing.');
+    }
+    const file = files.data.find(row => row.attributes.assetType === 'ASSET');
+    const recovered: BuildJob = { id: live.id, account: account.name, identity: accountIdentity(account), appId, version, build, filePath,
+      sha256, size, createdAt: Date.now(), fileId: file?.id ?? null, doneParts: [], status: 'reserved', error: null };
+    store?.saveBuild(recovered);
+    return continueBuild(recovered, api, fetcher, store);
+  }
   if (live) {
     const state = uploadState(live);
     const next = state === 'AWAITING_UPLOAD' ? 'Continue it with build-resume, or remove it with build-cancel if it has no local journal.' : 'Follow it with build-wait.';
@@ -74,7 +87,8 @@ async function continueBuild(job: BuildJob, api: BuildUploadAPI, fetcher: typeof
   try {
     let file: Resource | undefined;
     if (!fileId) {
-      const existing = await api.list(`/v1/buildUploads/${job.id}/buildUploadFiles?limit=10`, 10);
+      const existing = await api.list(`/v1/buildUploads/${job.id}/buildUploadFiles?limit=200`, 200);
+      if (existing.truncated) throw new Error('Incomplete build file list; refusing to reserve another file.');
       file = existing.data.find(row => row.attributes.assetType === 'ASSET' && row.attributes.fileSize === job.size);
       file ??= await api.post('/v1/buildUploadFiles', { data: { type: 'buildUploadFiles', attributes: {
         assetType: 'ASSET', fileName: basename(job.filePath), fileSize: job.size, uti: job.filePath.toLowerCase().endsWith('.pkg') ? 'com.apple.pkg' : 'com.apple.ipa',
@@ -97,11 +111,11 @@ async function continueBuild(job: BuildJob, api: BuildUploadAPI, fetcher: typeof
         await putFilePart(part, job.filePath, fetcher);
         store?.markBuildPart(job.id, { offset: part.offset, length: part.length, path });
       }
-      const after = await stat(job.filePath);
-      if (after.size !== job.size) throw new Error('IPA changed during upload.');
+      const after = await inspectIpa(job.filePath);
+      if (after.size !== job.size || after.sha256 !== job.sha256) throw new Error('IPA changed during upload.');
       store?.updateBuild(job.id, 'transferred');
       await api.patch(`/v1/buildUploadFiles/${fileId}`, 'buildUploadFiles', fileId,
-        { uploaded: true, sourceFileChecksums: { file: { hash: job.sha256, algorithm: 'SHA_256' } } });
+        { uploaded: true, sourceFileChecksums: { file: { hash: after.md5, algorithm: 'MD5' } } });
     }
     const status = await api.get(`/v1/buildUploads/${job.id}`);
     const final = uploadState(status) === 'UNKNOWN' ? 'PROCESSING' : uploadState(status);
@@ -118,7 +132,14 @@ async function continueBuild(job: BuildJob, api: BuildUploadAPI, fetcher: typeof
 /** Continues a journaled IPA upload: verifies the file is unchanged and skips byte ranges already sent. */
 export async function resumeBuild(uploadId: string, account: Account, store: PlanStore, api: BuildUploadAPI, fetcher: typeof fetch = fetch): Promise<BuildUploadResult> {
   if (!validId(uploadId)) throw new Error('Invalid build upload ID.');
-  const job = store.buildJob(uploadId);
+  let job: BuildJob;
+  try { job = store.buildJob(uploadId); }
+  catch (error) {
+    if (error instanceof Error && error.message === 'Build upload job not found.') {
+      throw new Error('Local build upload journal is missing. Run build-upload again with the same app, version, build and IPA; it will recover the Apple reservation without creating another one.');
+    }
+    throw error;
+  }
   if (job.account !== account.name || job.identity !== accountIdentity(account)) throw new Error('Build job belongs to a different account identity.');
   requireWrite(account, job.appId);
   const { size, sha256 } = await inspectIpa(job.filePath);

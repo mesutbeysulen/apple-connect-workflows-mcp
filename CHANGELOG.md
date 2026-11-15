@@ -2,6 +2,13 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/); while the version is below 1.0, a minor release may contain breaking changes, which are marked **Breaking**.
 
+## 0.19.3 — 2026-11-15
+
+### Fixed
+- Build upload files now commit an MD5 checksum, which Apple accepted on a live IPA after rejecting the previous SHA-256 value with HTTP 409. SHA-256 remains the local file-integrity check.
+- `build-upload` recovers an existing `AWAITING_UPLOAD` reservation when its local journal is missing, resends the file parts and commits it without opening a duplicate reservation.
+- `build-resume` explains how to recover when the local journal is missing.
+
 ## 0.19.2 — 2026-11-15
 
 ### Changed

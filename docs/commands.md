@@ -13,7 +13,7 @@ Run `apple-connect-mcp help <topic>` or `apple-connect-mcp <command> --help` for
 - [Screenshots and previews](#screenshots): Upload, order and clean up Asset Library screenshots and app previews.
 - [Header and Search Results](#creative-assets): Product page header and search results images or videos (iOS 27 / iPadOS 27 or later).
 - [Legacy screenshot sets](#legacy-screenshots): Apple's older appScreenshots API, deprecated but still served.
-- [Builds](#builds): Upload IPA or PKG files, resume or cancel uploads, wait for processing, distribute to TestFlight groups.
+- [Builds](#builds): Upload IPA or PKG files, resume or recover uploads, wait for processing, distribute to TestFlight groups.
 - [TestFlight](#testflight): Beta information, what-to-test notes, Beta App Review, groups and testers.
 - [Release](#release): Readiness report, App Review submission and publishing.
 - [Customer reviews](#reviews): Reply to App Store reviews.
@@ -121,7 +121,7 @@ Apple's older appScreenshots API, deprecated but still served. AppScreenshots; d
 <a id="builds"></a>
 ## Builds
 
-Upload IPA or PKG files, resume or cancel uploads, wait for processing, distribute to TestFlight groups.
+Upload IPA or PKG files, resume or recover uploads, wait for processing, distribute to TestFlight groups. Build-upload reuses a pending Apple reservation when its local journal is missing.
 
 ```text
   build-upload --account NAME --app ID --version 1.2.3 --build 42 --file /absolute/app.ipa|.pkg [--platform IOS|MAC_OS|TV_OS|VISION_OS]

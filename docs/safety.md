@@ -10,7 +10,7 @@ App Store Connect changes reach real customers, real prices and real reviews. Th
 - **Ownership checks.** Before writing, commands confirm that the version, build, product, page, placement, group or other resource belongs to the app named in the command. A typo in an ID fails instead of changing another app.
 - **Previews.** Commands that change prices, availability, team access, certificates, many files at once, or anything Apple will not let you take back show what they would do and write only with `--execute`. Examples: `app-price-set`, `availability-set`, `metadata-sync`, `screenshots-sync`, `user-invite`, `certificate-revoke`, `winback-create`, `ci-build-start`.
 - **Idempotent reruns.** Creating commands find an existing item by its identifier, name or vendor ID and return `exists` instead of making a duplicate. Updates send only fields that differ.
-- **Uploads resume.** Builds, screenshots, creative assets and previews are journaled before bytes move. `build-resume`, `asset-resume` and `creative-resume` continue from the journal without a second reservation.
+- **Uploads resume.** Builds, screenshots, creative assets and previews are journaled before bytes move. `build-resume`, `asset-resume` and `creative-resume` continue from the journal without a second reservation. If a build journal is missing but Apple still has a pending reservation, rerun `build-upload` with the same app, version, build and file; it recovers the reservation and resends every part before committing.
 
 ## Plans and digests
 

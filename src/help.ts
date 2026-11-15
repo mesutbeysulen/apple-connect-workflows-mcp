@@ -62,7 +62,7 @@ export const TOPICS: HelpTopic[] = [
   screenshot-upload --account NAME --app ID --version ID --localization ID --set ID --file /absolute/image.png
   screenshot-resume --account NAME --screenshot ID
   screenshot-order --account NAME --app ID --version ID --localization ID --set ID --order ID1,ID2,...` },
-  { id: 'builds', title: 'Builds', summary: 'Upload IPA or PKG files, resume or cancel uploads, wait for processing, distribute to TestFlight groups.',
+  { id: 'builds', title: 'Builds', summary: 'Upload IPA or PKG files, resume or recover uploads, wait for processing, distribute to TestFlight groups.', note: 'build-upload reuses a pending Apple reservation when its local journal is missing',
     commands: `  build-upload --account NAME --app ID --version 1.2.3 --build 42 --file /absolute/app.ipa|.pkg [--platform IOS|MAC_OS|TV_OS|VISION_OS]
   build-resume --account NAME --upload ID
   build-cancel --account NAME --app ID --upload ID

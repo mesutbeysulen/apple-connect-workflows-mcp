@@ -35,13 +35,33 @@ function fixture() {
   }) as typeof fetch;
   return { dir, filePath, api: withContract(api), fetcher, chunks, setUrl: (x: string) => partsUrl = x, get posts() { return posts; }, get committed() { return committed; } };
 }
-test('reserves, streams every byte range and commits SHA-256', async () => {
+test('reserves, streams every byte range and commits MD5', async () => {
   const f = fixture();
   try {
     assert.deepEqual(await uploadBuild({ account, appId: '123', version: '1.2.3', build: '42', filePath: f.filePath }, f.api, f.fetcher), { uploadId: 'upload', fileId: 'file', state: 'PROCESSING' });
     assert.deepEqual(f.chunks, [bytes.subarray(0,4), bytes.subarray(4)]);
-    assert.deepEqual(f.committed, { uploaded: true, sourceFileChecksums: { file: { hash: createHash('sha256').update(bytes).digest('hex'), algorithm: 'SHA_256' } } });
+    assert.deepEqual(f.committed, { uploaded: true, sourceFileChecksums: { file: { hash: createHash('md5').update(bytes).digest('hex'), algorithm: 'MD5' } } });
   } finally { rmSync(f.dir, { recursive: true }); }
+});
+test('recovers an Apple build upload when the local journal is missing', async () => {
+  const f = fixture(); const store = new PlanStore(':memory:'); let posts = 0; let committed: unknown;
+  const api: BuildUploadAPI = withContract({
+    post: async () => { posts++; throw new Error('A second reservation must not be created.'); },
+    get: async path => path.includes('/buildUploadFiles/')
+      ? { id: 'file', type: 'buildUploadFiles', attributes: { assetDeliveryState: { state: 'AWAITING_UPLOAD' }, uploadOperations: ops } }
+      : { id: 'upload', type: 'buildUploads', attributes: { state: { state: 'PROCESSING' } } },
+    list: async path => ({ data: path.includes('/buildUploadFiles')
+      ? [{ id: 'file', type: 'buildUploadFiles', attributes: { assetType: 'ASSET', fileSize: bytes.length } }]
+      : [{ id: 'upload', type: 'buildUploads', attributes: { state: { state: 'AWAITING_UPLOAD' } } }], truncated: false }),
+    patch: async (_path, _type, _id, attrs) => { committed = attrs; return {}; },
+  });
+  try {
+    assert.deepEqual(await uploadBuild({ account, appId: '123', version: '1.2.3', build: '42', filePath: f.filePath }, api, f.fetcher, store),
+      { uploadId: 'upload', fileId: 'file', state: 'PROCESSING' });
+    assert.equal(posts, 0);
+    assert.equal(store.buildJob('upload').fileId, 'file');
+    assert.deepEqual(committed, { uploaded: true, sourceFileChecksums: { file: { hash: createHash('md5').update(bytes).digest('hex'), algorithm: 'MD5' } } });
+  } finally { store.close(); rmSync(f.dir, { recursive: true }); }
 });
 test('invalid IPA and unsafe upload URL are rejected', async () => {
   const f = fixture();
