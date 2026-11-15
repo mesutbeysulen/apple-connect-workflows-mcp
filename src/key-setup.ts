@@ -8,12 +8,12 @@ export interface KeySetupInput { name: string; issuerId?: string; keyId?: string
 export interface KeySetupResult { account: string; keyId: string; privateKeyPath: string; configPath: string; readOnly: boolean; next: string[] }
 /**
  * Validates an App Store Connect .p8, stores a private copy and adds the account to the config.
- * Accounts start read-only unless write-allowed apps are named. The key's contents are never printed.
+ * Accounts can write to every app by default; --allow-app narrows that scope. The key's contents are never printed.
  */
 export function setupKey(input: KeySetupInput): KeySetupResult {
   const { name, issuerId, p8Path, configPath, replace = false } = input;
   // "all" is accepted for "*" so shells do not expand it.
-  const allowedAppIds = [...new Set((input.allowedAppIds ?? []).map(id => id === 'all' ? '*' : id))];
+  const allowedAppIds = [...new Set((input.allowedAppIds ?? ['*']).map(id => id === 'all' ? '*' : id))];
   if (!isAbsolute(p8Path) || !isAbsolute(configPath)) throw new Error('--p8 and --config must be absolute paths.');
   const keyId = input.keyId ?? basename(p8Path).match(/^AuthKey_([A-Za-z0-9]{10})\.p8$/)?.[1];
   if (!keyId) throw new Error('Pass --key-id, or keep Apple\'s AuthKey_XXXXXXXXXX.p8 file name.');
@@ -26,7 +26,8 @@ export function setupKey(input: KeySetupInput): KeySetupResult {
   if (accounts.some(a => a.name === name) && !replace) throw new Error(`Account ${name} already exists. Pass --replace to overwrite it.`);
   const keysDir = input.keysDir ?? resolve(homedir(), '.apple-connect-mcp', 'keys');
   const privateKeyPath = join(keysDir, `AuthKey_${keyId}.p8`);
-  const account = { name, keyType: issuerId ? 'team' as const : 'individual' as const, ...(issuerId ? { issuerId } : {}), keyId, privateKeyPath, readOnly: allowedAppIds.length === 0, allowedAppIds };
+  const account = { name, keyType: issuerId ? 'team' as const : 'individual' as const, ...(issuerId ? { issuerId } : {}), keyId, privateKeyPath,
+    readOnly: false, allowedAppIds, genericWrites: allowedAppIds.includes('*') };
   // Validate the whole resulting config before anything is written.
   const next = configSchema.parse({ ...current, accounts: [...accounts.filter(a => a.name !== name), account] });
   mkdirSync(keysDir, { recursive: true, mode: 0o700 });

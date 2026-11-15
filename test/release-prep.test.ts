@@ -301,7 +301,7 @@ test('schema check follows Apple rules for allowed forms and unknown fields', ()
 });
 test('generic plans validate against Apple, bind to a digest and never retry unknown outcomes', async () => {
   const store = new PlanStore(':memory:');
-  const open = { ...account, genericWrites: true };
+  const open = { ...account, genericWrites: true, allowedAppIds: ['*'] };
   const body = { data: { type: 'appEvents', attributes: { referenceName: 'Launch' }, relationships: { app: { data: { type: 'apps', id: '123' } } } } };
   const sent: unknown[] = [];
   let mode: 'ok' | 'refuse' | 'lost' = 'ok';
@@ -321,6 +321,7 @@ test('generic plans validate against Apple, bind to a digest and never retry unk
     await assert.rejects(applyApiPlan(plan.id, 'wrong', open, store, api), /Digest/);
     await assert.rejects(applyApiPlan(plan.id, plan.digest, account, store, api), /Generic writes are off/);
     await assert.rejects(applyApiPlan(plan.id, plan.digest, { ...open, allowedAppIds: [] }, store, api), /allowlist/);
+    await assert.rejects(applyApiPlan(plan.id, plan.digest, { ...open, allowedAppIds: ['123'] }, store, api), /require allowedAppIds/);
     await assert.rejects(applyApiPlan(plan.id, plan.digest, { ...open, keyId: 'ZZZZZZZZZZ' }, store, api), /credentials changed/);
     mode = 'refuse';
     await assert.rejects(applyApiPlan(plan.id, plan.digest, open, store, api), /409/);

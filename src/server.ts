@@ -464,7 +464,7 @@ export function createServer(service: ConnectService, configPath?: string): McpS
     return output({ endpoint, requestSchema: endpoint.body ? requestSchema(endpoint.body) : null });
   });
   server.registerTool('api_write_plan', {
-    description: 'Prepare a reviewed plan for any catalog write without a dedicated command, such as Custom Product Pages, in-app events, offers, Game Center or Xcode Cloud. Validates against Apple\'s schema. Never writes to Apple. A human may run it with the CLI api-apply command; do not treat creating it as authorization to run it.',
+    description: 'Prepare a reviewed plan for any catalog write without a dedicated command. Validates against Apple\'s schema and never writes to Apple. When it matches the user’s explicit request, use workflow_prepare with command api-apply and this plan’s ID and digest, then workflow_apply. The local account must allow genericWrites.',
     inputSchema: z.object({ account: z.string(), appId: idSchema, method: z.enum(['POST', 'PATCH', 'DELETE']), path: z.string().min(2).max(2000), requestBody: z.unknown().optional(), note: z.string().max(500).optional() }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   }, async ({ account, appId, method, path, requestBody, note }) => output(createApiPlan({ account: service.account(account), appId, method, path, requestBody, note }, service.store)));
@@ -473,7 +473,7 @@ export function createServer(service: ConnectService, configPath?: string): McpS
     inputSchema: z.object({ planId: z.string().uuid() }).strict(), annotations: { ...read, openWorldHint: false },
   }, async ({ planId }) => output(service.store.apiPlan(planId)));
   server.registerTool('metadata_plan', {
-    description: 'Prepare a local, persistent 30-minute metadata change plan with before/after values. Never writes to Apple. A human may execute the reviewed plan using the CLI apply command; do not treat plan creation as authorization to run it.',
+    description: 'Prepare a local, persistent 30-minute metadata change plan with before/after values. Never writes to Apple. When it matches the user’s explicit request, use workflow_prepare with command apply and this plan’s ID and digest, then workflow_apply.',
     inputSchema: prepareSchema, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, async input => output(await service.prepare(input)));
   server.registerTool('plan_get', {

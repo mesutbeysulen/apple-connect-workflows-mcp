@@ -34,6 +34,8 @@ export async function applyApiPlan(id: string, expectedDigest: string, account: 
   if (plan.body.account !== account.name || plan.body.identity !== accountIdentity(account)) throw new Error('Account credentials changed; prepare a new plan.');
   if (!account.genericWrites) throw new Error('Generic writes are off for this account. Set genericWrites: true in local configuration to allow api-apply.');
   requireWrite(account, plan.body.appId);
+  // Generic endpoint paths cannot prove ownership of the declared app ID. A narrowed app allowlist must not be bypassed.
+  if (!account.allowedAppIds.includes('*')) throw new Error('Generic writes require allowedAppIds: ["*"]. Use a dedicated command for an account restricted to specific apps.');
   if (plan.status === 'completed') return plan;
   if (plan.status === 'uncertain') throw new Error('The last attempt has an unknown outcome and may have reached Apple. Check the remote state, then prepare a new plan if needed.');
   if (Date.now() >= plan.body.expiresAt) throw new Error('Plan expired; prepare a new one.');

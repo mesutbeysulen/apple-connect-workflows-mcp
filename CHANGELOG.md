@@ -2,6 +2,14 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/); while the version is below 1.0, a minor release may contain breaking changes, which are marked **Breaking**.
 
+## 0.19.2 — 2026-11-15
+
+### Changed
+- Fresh accounts created by `key-setup` can write to every app the Apple key can access and can apply generic catalog writes through MCP by default. Existing explicit account restrictions remain in effect.
+- Generic writes require the all-app allowlist, because a generic endpoint cannot verify the app ownership of an arbitrary resource ID. `key-setup --allow-app ID1,ID2` keeps generic writes off.
+- An explicit user request authorizes the matching reviewed MCP workflow plan; assistants no longer ask for the same approval twice. Ambiguous targets still need clarification.
+- The install guide, sample config, and MCP tool descriptions reflect these defaults and explain how to restrict access.
+
 ## 0.19.1 — 2026-11-15
 
 ### Added

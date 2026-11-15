@@ -12,14 +12,14 @@ export const accountSchema = z.object({
   issuerId: z.string().uuid().optional(),
   keyId: z.string().regex(/^[A-Za-z0-9]{10}$/),
   privateKeyPath: absolutePath,
-  readOnly: z.boolean().default(true),
+  readOnly: z.boolean().default(false),
   /** App IDs this account may change; "*" allows every app the key can see, including apps added later. */
-  allowedAppIds: z.array(z.string().regex(/^(\d+|\*)$/)).default([]),
-  /** Lets reviewed api-apply plans run. Off by default because a generic plan cannot prove which app it affects. */
-  genericWrites: z.boolean().default(false),
+  allowedAppIds: z.array(z.string().regex(/^(\d+|\*)$/)).default(['*']),
+  /** Lets reviewed api-apply plans run for catalog endpoints without dedicated commands. */
+  genericWrites: z.boolean().default(true),
   /**
-   * Lets MCP clients run reviewed plans with workflow_apply, after the client asks the user to approve the
-   * tool call. Set false to require a person to run workflow-apply in a terminal instead.
+   * Lets MCP clients run reviewed plans with workflow_apply for explicit user requests.
+   * Set false to require a person to run workflow-apply in a terminal instead.
    */
   mcpApply: z.boolean().default(true),
 }).strict().refine(a => a.keyType === 'individual' ? a.issuerId === undefined : a.issuerId !== undefined, 'Team keys need issuerId; individual keys must not set it.');

@@ -220,7 +220,7 @@ export const TOPICS: HelpTopic[] = [
   alt-domain-add --account NAME --domain apps.example.com --name TEXT
   marketplace-search-set --account NAME --app ID --catalog-url https://...
   alt-package-create --account NAME --app ID --version ID` },
-  { id: 'generic-writes', title: 'Any other write', summary: 'Reviewed, schema-checked plans for any catalog endpoint without a dedicated command.', note: "needs genericWrites: true; prepare plans with the api_write_plan MCP tool",
+  { id: 'generic-writes', title: 'Any other write', summary: 'Reviewed, schema-checked plans for any catalog endpoint without a dedicated command.', note: "genericWrites is on by default; prepare plans with the api_write_plan MCP tool",
     commands: `  api-plan-show --plan ID
   api-apply --plan ID --digest HASH` },
 ];

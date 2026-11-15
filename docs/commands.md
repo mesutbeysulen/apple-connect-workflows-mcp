@@ -391,7 +391,7 @@ Alternative distribution keys, domains, marketplace search details and packages.
 <a id="generic-writes"></a>
 ## Any other write
 
-Reviewed, schema-checked plans for any catalog endpoint without a dedicated command. Needs genericWrites: true; prepare plans with the api_write_plan MCP tool.
+Reviewed, schema-checked plans for any catalog endpoint without a dedicated command. GenericWrites is on by default; prepare plans with the api_write_plan MCP tool.
 
 ```text
   api-plan-show --plan ID

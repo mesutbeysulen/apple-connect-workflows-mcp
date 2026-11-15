@@ -601,7 +601,7 @@ async function main(): Promise<void> {
     if (!!values.issuer === (values.individual === true)) throw new Error('Pass exactly one of --issuer or --individual.');
     const configPath = values.config ?? process.env.APPLE_CONNECT_CONFIG;
     if (!configPath) throw new Error('Pass --config or set APPLE_CONNECT_CONFIG; the file is created if missing.');
-    console.log(JSON.stringify(setupKey({ name: a.name, issuerId: values.issuer, p8Path: a.p8, keyId: values['key-id'], configPath, allowedAppIds: ids(values['allow-app'] ?? ''), replace: values.replace === true }), null, 2));
+    console.log(JSON.stringify(setupKey({ name: a.name, issuerId: values.issuer, p8Path: a.p8, keyId: values['key-id'], configPath, allowedAppIds: values['allow-app'] === undefined ? undefined : ids(values['allow-app']), replace: values.replace === true }), null, 2));
     return;
   }
   const config = loadConfig(values.config);

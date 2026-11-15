@@ -23,9 +23,12 @@ test('JWT is signed ES256 with correct audience and bounded lifetime', () => {
     assert(verify('sha256', Buffer.from(`${header}.${payload}`), { key: publicKey, dsaEncoding: 'ieee-p1363' }, Buffer.from(signature, 'base64url')));
   } finally { rmSync(dir, { recursive: true }); }
 });
-test('configuration defaults read-only and rejects duplicate account names', () => {
+test('configuration defaults to full local write access and rejects duplicate account names', () => {
   const account = { name: 'test', issuerId: '11111111-1111-4111-8111-111111111111', keyId: 'ABCDEFGHIJ', privateKeyPath: '/tmp/key.p8' };
-  assert.equal(configSchema.parse({ accounts: [account] }).accounts[0]!.readOnly, true);
+  const defaults = configSchema.parse({ accounts: [account] }).accounts[0]!;
+  assert.deepEqual({ readOnly: defaults.readOnly, allowedAppIds: defaults.allowedAppIds, genericWrites: defaults.genericWrites, mcpApply: defaults.mcpApply },
+    { readOnly: false, allowedAppIds: ['*'], genericWrites: true, mcpApply: true });
+  assert.equal(configSchema.parse({ accounts: [{ ...account, readOnly: true, allowedAppIds: [], genericWrites: false, mcpApply: false }] }).accounts[0]!.readOnly, true);
   assert.throws(() => configSchema.parse({ accounts: [account, account] }));
 });
 test('never sends bearer token to foreign origin, including pagination', async () => {

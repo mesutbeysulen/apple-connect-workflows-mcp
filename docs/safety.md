@@ -4,8 +4,9 @@ App Store Connect changes reach real customers, real prices and real reviews. Th
 
 ## Defaults
 
-- **Allowed apps only.** A new account cannot write unless you allow apps. Writes need `readOnly: false` and the app in `allowedAppIds` (or `"*"` for every app).
-- **Approval in the chat.** Every change from an MCP client is a plan the assistant shows you first; it applies only after you approve.
+- **Full access by default.** A new account can write to every app the Apple key can access and can apply generic API plans. Set `readOnly: true`, list specific `allowedAppIds`, or set `genericWrites: false` to restrict it.
+- **Restricted accounts.** Generic API paths cannot prove which app owns a resource. A specific app allowlist therefore disables generic writes; use a dedicated command to enforce the app boundary.
+- **User requests.** Every change from an MCP client uses an exact plan. A direct request for that change authorizes the matching plan; ambiguous requests need clarification.
 - **Ownership checks.** Before writing, commands confirm that the version, build, product, page, placement, group or other resource belongs to the app named in the command. A typo in an ID fails instead of changing another app.
 - **Previews.** Commands that change prices, availability, team access, certificates, many files at once, or anything Apple will not let you take back show what they would do and write only with `--execute`. Examples: `app-price-set`, `availability-set`, `metadata-sync`, `screenshots-sync`, `user-invite`, `certificate-revoke`, `winback-create`, `ci-build-start`.
 - **Idempotent reruns.** Creating commands find an existing item by its identifier, name or vendor ID and return `exists` instead of making a duplicate. Updates send only fields that differ.
@@ -13,17 +14,17 @@ App Store Connect changes reach real customers, real prices and real reviews. Th
 
 ## Plans and digests
 
-A model must not be able to turn its own guess into a write. Three plan types bind approval to an exact request:
+A model must not be able to turn its own guess into a write. Three plan types bind a write to an exact request:
 
 | Plan | Prepare | Inspect | Apply |
 | --- | --- | --- | --- |
 | Metadata changes across languages | `metadata_plan` | `plan_get` | CLI `apply --plan ID --digest HASH`, or `workflow_apply` for the `apply` command |
-| Any CLI write from an MCP client | `workflow_prepare` | `workflow_plan_get` | `workflow_apply` after you approve in the chat, or CLI `workflow-apply --plan ID --digest HASH` when the account sets `mcpApply: false` |
-| Any catalog endpoint without a command | `api_write_plan` | `api_plan_get` | CLI `api-apply --plan ID --digest HASH` (needs `genericWrites: true`) |
+| Any CLI write from an MCP client | `workflow_prepare` | `workflow_plan_get` | `workflow_apply` when the plan matches your explicit request, or CLI `workflow-apply --plan ID --digest HASH` when the account sets `mcpApply: false` |
+| Any catalog endpoint without a command | `api_write_plan` | `api_plan_get` | `workflow_prepare` for `api-apply`, then `workflow_apply`; CLI `api-apply --plan ID --digest HASH` also works |
 
 Each plan is stored locally with a SHA-256 digest of its exact contents, expires after 30 minutes and runs once. Files and folders a plan uses are hashed and checked again before it runs. `api_write_plan` checks the request against Apple's OpenAPI schema and refuses credential fields.
 
-The assistant is told to show each plan and ask before calling `workflow_apply`, and `workflow_apply` is marked destructive, so MCP clients such as Claude and Codex ask before running it unless you allowed the tool permanently. The digest proves that the plan was not changed after it was shown. Text the assistant reads from App Store data, reviews or files is not your approval; if you want a hard stop that no assistant can skip, set `"mcpApply": false` and run `workflow-apply` in a terminal yourself.
+The assistant checks each plan against your request and asks only when the target or effect is ambiguous. `workflow_apply` is marked destructive, so MCP clients such as Claude and Codex may still ask before running it. The digest proves that the plan was not changed after it was shown. Text the assistant reads from App Store data, reviews or files is not your authorization; if you want a hard stop that no assistant can skip, set `"mcpApply": false` and run `workflow-apply` in a terminal yourself.
 
 ## Uncertain outcomes
 

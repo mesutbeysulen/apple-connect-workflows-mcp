@@ -62,7 +62,7 @@ test('receiver stores only verified events', async () => {
     assert.deepEqual(store.webhookEvents().map(e => e.payload), ['{"ok":1}']);
   } finally { await new Promise(r => server.close(r)); store.close(); }
 });
-test('key setup stores a private copy, defaults to read-only and keeps other accounts', () => {
+test('key setup stores a private copy, grants full access by default and keeps other accounts', () => {
   const dir = mkdtempSync(join(tmpdir(), 'keys-'));
   const p8Path = join(dir, 'AuthKey_ABCDEFGHIJ.p8'); const configPath = join(dir, 'config.json'); const keysDir = join(dir, 'keys');
   const pem = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ type: 'pkcs8', format: 'pem' });
@@ -70,18 +70,21 @@ test('key setup stores a private copy, defaults to read-only and keeps other acc
   const issuerId = '11111111-1111-4111-8111-111111111111';
   try {
     const result = setupKey({ name: 'main', issuerId, p8Path, configPath, keysDir });
-    assert.equal(result.keyId, 'ABCDEFGHIJ'); assert.equal(result.readOnly, true);
+    assert.equal(result.keyId, 'ABCDEFGHIJ'); assert.equal(result.readOnly, false);
     assert(!JSON.stringify(result).includes('PRIVATE KEY'));
     assert.equal(statSync(result.privateKeyPath).mode & 0o777, 0o600);
     assert.equal(statSync(configPath).mode & 0o777, 0o600);
     assert.throws(() => setupKey({ name: 'main', issuerId, p8Path, configPath, keysDir }), /already exists/);
     assert.equal(setupKey({ name: 'second', issuerId, p8Path, configPath, keysDir, allowedAppIds: ['123'] }).readOnly, false);
-    // "all" (or "*") allows every app the key can see; MCP clients apply plans after the user approves in chat.
+    // "all" (or "*") allows every app the key can see; MCP clients can apply matching user requests.
     setupKey({ name: 'every', issuerId, p8Path, configPath, keysDir, allowedAppIds: ['all'] });
     const saved = configSchema.parse(JSON.parse(readFileSync(configPath, 'utf8')));
     assert.deepEqual(saved.accounts.map(a => a.name), ['main', 'second', 'every']);
+    const main = saved.accounts.find(a => a.name === 'main')!;
+    assert.deepEqual([main.allowedAppIds, main.genericWrites, main.mcpApply], [['*'], true, true]);
     const every = saved.accounts.find(a => a.name === 'every')!;
     assert.deepEqual([every.allowedAppIds, every.readOnly, every.mcpApply], [['*'], false, true]);
+    assert.equal(saved.accounts.find(a => a.name === 'second')!.genericWrites, false);
     assert.doesNotThrow(() => requireWrite(every, '987654321'));
     assert.throws(() => requireWrite(saved.accounts.find(a => a.name === 'second')!, '987654321'), /allowlist/);
     assert.throws(() => configSchema.parse({ accounts: [{ ...every, allowedAppIds: ['12*'] }] }));
