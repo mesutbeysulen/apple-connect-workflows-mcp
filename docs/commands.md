@@ -87,6 +87,7 @@ Upload, order and clean up Asset Library screenshots and app previews. App Store
                [--placement-type APP_SCREENSHOT|IMESSAGE_APP_SCREENSHOT] [--reference-name TEXT]
   asset-resume --account NAME --image ID
   asset-order --account NAME --app ID --version ID --localization ID --placement-group GROUP --order ID1,ID2,...
+  placement-remove --account NAME --app ID --version ID --localization ID --placement ID
   asset-cleanup --account NAME --app ID [--older-than-hours 24] [--execute]
 ```
 

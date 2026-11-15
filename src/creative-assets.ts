@@ -296,21 +296,23 @@ export async function placeCreative(input: { account: Account; appId: string; ve
   }
   return { assetId, assetState, placements };
 }
-/** Removes a placement only after confirming it sits on this app's localization. The asset stays in Asset Library. */
-export async function removeCreativePlacement(input: { account: Account; appId: string; versionId: string; localizationId: string; placementId: string }, api: AssetAPI): Promise<{ removed: string }> {
+/** Removes any placement on this app's version localization. The underlying library asset stays intact. */
+export async function removePlacement(input: { account: Account; appId: string; versionId: string; localizationId: string; placementId: string }, api: AssetAPI): Promise<{ removed: string }> {
   const { account, appId, versionId, localizationId, placementId } = input;
   requireWrite(account, appId);
   if (![versionId, localizationId, placementId].every(validId)) throw new Error('Invalid version, localization or placement ID.');
   await versionOfApp(api, appId, versionId);
   const localizations = await api.list(`/v1/appStoreVersions/${versionId}/appStoreVersionLocalizations?limit=200`, 2000);
   if (localizations.truncated || !localizations.data.some(row => row.id === localizationId)) throw new Error('Localization is not verified for this version.');
-  const query = new URLSearchParams({ 'filter[id]': placementId, limit: '1' });
-  const placement = (await api.list(`/v1/appStoreVersionLocalizations/${localizationId}/placements?${query}`, 1)).data[0];
+  const placements = await api.list(`/v1/appStoreVersionLocalizations/${localizationId}/placements?limit=200`, 2000);
+  if (placements.truncated) throw new Error('Incomplete placement list; refusing to delete.');
+  const placement = placements.data.find(row => row.id === placementId);
   if (placement?.id !== placementId) throw new Error('Placement is not on this localization.');
-  if (!Object.values(CREATIVE_PLACEMENTS).includes(placement.attributes.placementType as never)) throw new Error('Not a Header or Search Results placement.');
   await api.delete(`/v1/appAssetLibraryPlacements/${placementId}`);
   return { removed: placementId };
 }
+/** Backwards-compatible alias for clients using creative-remove. */
+export const removeCreativePlacement = removePlacement;
 /** Per-locale view of Header and Search Results for one version. */
 export async function creativeOverview(api: Pick<AssetAPI, 'list'>, versionId: string) {
   const localizations = await api.list(`/v1/appStoreVersions/${versionId}/appStoreVersionLocalizations?limit=200`, 2000);

@@ -2,6 +2,14 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/); while the version is below 1.0, a minor release may contain breaking changes, which are marked **Breaking**.
 
+## 0.19.1 — 2026-11-15
+
+### Added
+- `placement-remove` deletes an App Store version localization placement after verifying its app, version, and localization. It supports screenshots, app previews, Header, and Search Results placements; the underlying Asset Library item remains available.
+
+### Changed
+- `creative-remove` remains available and now accepts every placement type on an App Store version localization.
+
 ## 0.19.0 — 2026-11-15
 
 ### Changed

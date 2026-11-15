@@ -18,7 +18,7 @@ import { createEncryptionDeclaration, uploadEncryptionDocument, attachEncryption
 import { uploadAsset, resumeAsset, orderPlacements, IMAGE_PLACEMENT_TYPES, type ImagePlacementType } from './asset-library.js';
 import { createScreenshotSet, orderScreenshots } from './screenshot-sets.js';
 import { cleanupStaleAssets } from './asset-cleanup.js';
-import { uploadCreative, resumeCreative, submitCreatives, placeCreative, removeCreativePlacement, parseTargets, type CreativeKind } from './creative-assets.js';
+import { uploadCreative, resumeCreative, submitCreatives, placeCreative, removePlacement, parseTargets, type CreativeKind } from './creative-assets.js';
 import { releaseReadiness, submitRelease, publishRelease, manualCheckIds, type ManualCheckId } from './release.js';
 import { createIap, createSubscription, createSubscriptionGroup, createProductVersion, localizeProduct, localizeProductVersion, setAppPrice, setIapPrice, setSubscriptionPrice, type ProductKind } from './commercial.js';
 import { uploadProductVersionImage } from './product-images.js';
@@ -221,10 +221,15 @@ const commands: Record<string, Handler> = {
     const acc = account();
     return placeCreative({ account: acc, appId: a.app, versionId: a.version, localizationId: a.localization, kind, assetId: (v.image ?? v.video)!, targets: parseTargets(a.placements), placementGroup: v['placement-group'], replace: v.replace === true }, screenshotClient(acc));
   },
+  'placement-remove': async (v, { account }) => {
+    const a = required(v, 'app', 'version', 'localization', 'placement');
+    const acc = account();
+    return removePlacement({ account: acc, appId: a.app, versionId: a.version, localizationId: a.localization, placementId: a.placement }, screenshotClient(acc));
+  },
   'creative-remove': async (v, { account }) => {
     const a = required(v, 'app', 'version', 'localization', 'placement');
     const acc = account();
-    return removeCreativePlacement({ account: acc, appId: a.app, versionId: a.version, localizationId: a.localization, placementId: a.placement }, screenshotClient(acc));
+    return removePlacement({ account: acc, appId: a.app, versionId: a.version, localizationId: a.localization, placementId: a.placement }, screenshotClient(acc));
   },
   'release-check': async (v, { account }) => {
     const a = required(v, 'app', 'version');
@@ -545,7 +550,7 @@ const WRITES: Record<string, Capability> = {
   'asset-upload': 'upload', 'asset-resume': 'upload', 'asset-order': 'upload', 'asset-cleanup': 'upload',
   'screenshot-set-create': 'upload', 'screenshot-upload': 'upload', 'screenshot-resume': 'upload', 'screenshot-order': 'upload',
   'build-upload': 'upload', 'build-resume': 'upload', 'build-cancel': 'upload', 'testflight-distribute': 'upload',
-  'creative-upload': 'upload', 'creative-resume': 'upload', 'creative-place': 'upload', 'creative-remove': 'upload',
+  'creative-upload': 'upload', 'creative-resume': 'upload', 'creative-place': 'upload', 'creative-remove': 'upload', 'placement-remove': 'upload',
   'creative-submit': 'review', 'release-submit': 'review', 'release-publish': 'release',
   'iap-create': 'commercial', 'subscription-group-create': 'commercial', 'subscription-create': 'commercial', 'product-localize': 'commercial',
   'product-version-create': 'commercial', 'product-version-localize': 'commercial', 'product-version-image-upload': 'commercial',

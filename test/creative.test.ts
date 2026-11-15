@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { uploadCreative, resumeCreative, submitCreatives, placeCreative, removeCreativePlacement, imageInfo, parseTargets, creativeOverview } from '../src/creative-assets.js';
+import { uploadCreative, resumeCreative, submitCreatives, placeCreative, removePlacement, removeCreativePlacement, imageInfo, parseTargets, creativeOverview } from '../src/creative-assets.js';
 import { PlanStore } from '../src/plans.js';
 import { AppleError } from '../src/apple.js';
 import { account, readOnly, res, fakeApi, png } from './helpers.js';
@@ -173,15 +173,23 @@ test('standalone creative review submits exactly the requested asset', async () 
   const rejected = fakeApi(routes('READY_FOR_SALE', 'REJECTED'));
   await assert.rejects(submitCreatives({ account, appId: '123', imageIds: ['img'] }, rejected.api), /cannot be submitted/);
 });
-test('removing a placement checks it is a creative placement on this localization', async () => {
+test('removing any placement checks the app and localization before deletion', async () => {
   const input = { account, appId: '123', versionId: 'v', localizationId: 'loc', placementId: 'p1' };
   const ok = fakeApi(routes('PREPARE_FOR_SUBMISSION', 'APPROVED', [res('p1', 'appAssetLibraryPlacements', { placementType: 'PRODUCT_PAGE_HEADER_ASSET' })]));
   assert.deepEqual(await removeCreativePlacement(input, ok.api), { removed: 'p1' });
   const shot = fakeApi(routes('PREPARE_FOR_SUBMISSION', 'APPROVED', [res('p1', 'appAssetLibraryPlacements', { placementType: 'APP_SCREENSHOT' })]));
-  await assert.rejects(removeCreativePlacement(input, shot.api), /Not a Header/);
+  assert.deepEqual(await removePlacement(input, shot.api), { removed: 'p1' });
+  assert.deepEqual(shot.writes().map(w => w.path), ['/v1/appAssetLibraryPlacements/p1']);
   const none = fakeApi(routes('PREPARE_FOR_SUBMISSION', 'APPROVED'));
-  await assert.rejects(removeCreativePlacement(input, none.api), /not on this localization/);
-  assert.equal(shot.writes().length + none.writes().length, 0);
+  await assert.rejects(removePlacement(input, none.api), /not on this localization/);
+  assert.equal(none.writes().length, 0);
+  const partial = fakeApi(routes('PREPARE_FOR_SUBMISSION', 'APPROVED', [res('p1', 'appAssetLibraryPlacements', { placementType: 'APP_SCREENSHOT' })]));
+  const partialApi = { ...partial.api, list: async (path: string) => path.includes('/placements?') ? { data: [], truncated: true } : partial.api.list(path) };
+  await assert.rejects(removePlacement(input, partialApi), /Incomplete placement list/);
+  assert.equal(partial.writes().length, 0);
+  const foreign = fakeApi(routes('PREPARE_FOR_SUBMISSION', 'APPROVED', [res('p1', 'appAssetLibraryPlacements', { placementType: 'APP_SCREENSHOT' })]));
+  await assert.rejects(removePlacement({ ...input, account: { ...account, allowedAppIds: ['*'] }, appId: '456' }, foreign.api), /does not belong to the requested app/);
+  assert.equal(foreign.writes().length, 0);
 });
 test('overview lists both placements per locale', async () => {
   const f = fakeApi(routes('PREPARE_FOR_SUBMISSION', 'APPROVED'));
