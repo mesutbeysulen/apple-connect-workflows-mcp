@@ -94,3 +94,32 @@ test('with mcpApply: false MCP clients cannot apply plans; a person applies them
     assert.match(cli('workflow-apply', '--plan', plan.id, '--digest', plan.digest).stderr, /status is uncertain/);
   } finally { await client.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('a running server picks up config edits without reconnecting, and refuses an invalid config', { timeout: 30000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'apple-reload-'));
+  const config = join(dir, 'config.json');
+  const file = join(dir, 'image.png');
+  writeFileSync(file, 'first');
+  const account = { name: 'demo', issuerId: '11111111-1111-4111-8111-111111111111', keyId: 'ABCDEFGHIJ', privateKeyPath: join(dir, 'missing.p8'), readOnly: false, allowedAppIds: ['111'] };
+  const write = (accounts: unknown[]) => writeFileSync(config, JSON.stringify({ databasePath: join(dir, 'plans.sqlite'), accounts }));
+  write([{ ...account, readOnly: true }]);
+  const client = new Client({ name: 'reload-test', version: '1.0.0' });
+  const transport = new StdioClientTransport({ command: process.execPath, args: [resolve('dist/cli.js'), 'serve', '--config', config], stderr: 'pipe' });
+  const prepare = () => client.callTool({ name: 'workflow_prepare', arguments: { command: 'asset-upload', args: { account: 'demo', app: '123', version: 'v', localization: 'l', 'placement-group': 'IPHONE_67', file } } });
+  try {
+    await client.connect(transport);
+    // The account starts read-only; turning writes on in the file applies to the next call.
+    assert.match(JSON.stringify((await prepare()).content), /read-only/);
+    write([{ ...account, allowedAppIds: ['111', '123'] }, { ...account, name: 'second' }]);
+    assert.equal((await prepare()).isError, undefined);
+    const accounts = await client.callTool({ name: 'accounts_list', arguments: {} });
+    assert.match(JSON.stringify(accounts.structuredContent), /second/);
+    // A broken edit fails loudly instead of keeping the old permissions; fixing it recovers.
+    writeFileSync(config, '{ "accounts": [');
+    const broken = await client.callTool({ name: 'accounts_list', arguments: {} });
+    assert.equal(broken.isError, true);
+    assert.match(JSON.stringify(broken.content), /not valid/);
+    write([{ ...account, readOnly: true }]);
+    assert.match(JSON.stringify((await prepare()).content), /read-only/);
+  } finally { await client.close(); rmSync(dir, { recursive: true, force: true }); }
+});

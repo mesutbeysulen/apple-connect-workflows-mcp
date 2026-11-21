@@ -1,5 +1,6 @@
+import { statSync } from 'node:fs';
 import { z } from 'zod';
-import { accountIdentity, requireWrite, type Account, type Config } from './config.js';
+import { accountIdentity, loadConfig, requireWrite, type Account, type Config } from './config.js';
 import { AppleClient, createTokenProvider, type AppleAPI } from './apple.js';
 import { verifyEditableVersion } from './screenshots.js';
 import { PlanStore, type Changes, type Plan, type Step } from './plans.js';
@@ -19,8 +20,33 @@ export const prepareSchema = z.object({
 }).strict();
 const equal = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 export class ConnectService {
-  constructor(public config: Config, public store: PlanStore,
-    private factory: (account: Account) => AppleAPI = a => new AppleClient(createTokenProvider(a))) {}
+  private current: Config;
+  private stamp: string | undefined;
+  /**
+   * With a config path, a running server re-reads the file whenever it changes, so new accounts, allowed apps
+   * and write settings apply without reconnecting. An invalid edit fails every call until it is fixed, rather
+   * than quietly keeping the old permissions. The database path is fixed at startup.
+   */
+  constructor(config: Config, public store: PlanStore,
+    private factory: (account: Account) => AppleAPI = a => new AppleClient(createTokenProvider(a)), private configPath?: string) {
+    this.current = config;
+    this.stamp = configPath ? ConnectService.fileStamp(configPath) : undefined;
+  }
+  private static fileStamp(path: string): string {
+    const info = statSync(path);
+    return `${info.mtimeMs}:${info.size}:${info.ino}`;
+  }
+  get config(): Config {
+    if (!this.configPath) return this.current;
+    let stamp: string;
+    try { stamp = ConnectService.fileStamp(this.configPath); } catch { throw new Error(`Config file ${this.configPath} is missing or unreadable.`); }
+    if (stamp === this.stamp) return this.current;
+    let next: Config;
+    try { next = loadConfig(this.configPath); }
+    catch (error) { throw new Error(`Config file ${this.configPath} is not valid; fix it and retry. ${error instanceof Error ? error.message.slice(0, 300) : ''}`); }
+    this.current = next; this.stamp = stamp;
+    return next;
+  }
   account(name: string): Account {
     const account = this.config.accounts.find(a => a.name === name);
     if (!account) throw new Error('Unknown account name. Use accounts_list.');

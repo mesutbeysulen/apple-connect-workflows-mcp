@@ -13,7 +13,7 @@ This guide installs the server, adds an App Store Connect API key, connects an M
 From npm (recommended), pinned to a version:
 
 ```sh
-npx -y apple-connect-workflows-mcp@0.19.3 --help
+npx -y apple-connect-workflows-mcp@0.19.4 --help
 ```
 
 From source, when you want to read or change the code:
@@ -25,7 +25,7 @@ npm ci
 npm run build
 ```
 
-Below, `apple-connect-mcp` stands for `npx -y apple-connect-workflows-mcp@0.19.3`, or `node /absolute/path/to/dist/cli.js` for a source checkout.
+Below, `apple-connect-mcp` stands for `npx -y apple-connect-workflows-mcp@0.19.4`, or `node /absolute/path/to/dist/cli.js` for a source checkout.
 
 ## 2. Add an API key
 
@@ -93,14 +93,14 @@ Claude Code:
 
 ```sh
 claude mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.19.3 serve
+  npx -y apple-connect-workflows-mcp@0.19.4 serve
 ```
 
 Codex CLI:
 
 ```sh
 codex mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.19.3 serve
+  npx -y apple-connect-workflows-mcp@0.19.4 serve
 ```
 
 Clients that use a JSON config:
@@ -110,7 +110,7 @@ Clients that use a JSON config:
   "mcpServers": {
     "apple-connect": {
       "command": "npx",
-      "args": ["-y", "apple-connect-workflows-mcp@0.19.3", "serve"],
+      "args": ["-y", "apple-connect-workflows-mcp@0.19.4", "serve"],
       "env": { "APPLE_CONNECT_CONFIG": "/absolute/path/config.json" }
     }
   }
@@ -132,7 +132,7 @@ Every read tool is listed in [MCP tools](mcp-tools.md). Collection results inclu
 
 ## 5. Restrict changes (optional)
 
-New accounts already allow writes to every app the Apple key can access. To restrict an account, edit its config and restart the server:
+New accounts already allow writes to every app the Apple key can access. To restrict an account, edit its config. A running server picks up the change on its next call; no restart is needed (except for `databasePath`):
 
 ```json
 { "name": "main", "readOnly": false, "allowedAppIds": ["1234567890"], "genericWrites": false }

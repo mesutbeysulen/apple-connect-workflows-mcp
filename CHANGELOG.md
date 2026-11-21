@@ -2,6 +2,11 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/); while the version is below 1.0, a minor release may contain breaking changes, which are marked **Breaking**.
 
+## 0.19.4 — 2026-11-22
+
+### Changed
+- A running MCP server re-reads the config file when it changes, so new accounts, allowed apps and write settings apply on the next call without reconnecting the client. An invalid edit makes calls fail with a clear message until it is fixed, instead of keeping the old permissions. Changing `databasePath` still needs a restart.
+
 ## 0.19.3 — 2026-11-15
 
 ### Fixed

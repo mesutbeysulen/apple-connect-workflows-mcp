@@ -606,7 +606,7 @@ async function main(): Promise<void> {
   }
   const config = loadConfig(values.config);
   const store = new PlanStore(config.databasePath);
-  const service = new ConnectService(config, store);
+  const service = new ConnectService(config, store, undefined, command === 'serve' ? values.config ?? process.env.APPLE_CONNECT_CONFIG : undefined);
   if (command === 'serve') {
     serveStdio(() => createServer(service, values.config ?? process.env.APPLE_CONNECT_CONFIG));
     const close = () => { store.close(); process.exit(0); };
