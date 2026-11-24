@@ -13,7 +13,7 @@ This guide installs the server, adds an App Store Connect API key, connects an M
 From npm (recommended), pinned to a version:
 
 ```sh
-npx -y apple-connect-workflows-mcp@0.19.4 --help
+npx -y apple-connect-workflows-mcp@0.19.5 --help
 ```
 
 From source, when you want to read or change the code:
@@ -25,14 +25,14 @@ npm ci
 npm run build
 ```
 
-Below, `apple-connect-mcp` stands for `npx -y apple-connect-workflows-mcp@0.19.4`, or `node /absolute/path/to/dist/cli.js` for a source checkout.
+The commands below use the published npm package directly. For a source checkout, replace `npx -y apple-connect-workflows-mcp@0.19.5` with `node /absolute/path/to/dist/cli.js`.
 
 ## 2. Add an API key
 
 Pass the **path** to the `.p8` file. Never paste its contents into a chat, a shell argument or an environment variable.
 
 ```sh
-apple-connect-mcp key-setup \
+npx -y apple-connect-workflows-mcp@0.19.5 key-setup \
   --config "$HOME/.apple-connect-mcp/config.json" \
   --name main --issuer YOUR_ISSUER_UUID \
   --p8 /absolute/path/AuthKey_ABCDEFGHIJ.p8
@@ -45,13 +45,13 @@ apple-connect-mcp key-setup \
 Check the connection:
 
 ```sh
-apple-connect-mcp doctor --config "$HOME/.apple-connect-mcp/config.json"
+npx -y apple-connect-workflows-mcp@0.19.5 doctor --config "$HOME/.apple-connect-mcp/config.json"
 ```
 
 `doctor` only proves that the apps list can be read; other operations may need more API roles. For a full read check, run every read tool against one app; nothing is changed:
 
 ```sh
-apple-connect-mcp smoke-read --config "$HOME/.apple-connect-mcp/config.json" \
+npx -y apple-connect-workflows-mcp@0.19.5 smoke-read --config "$HOME/.apple-connect-mcp/config.json" \
   --account main --app 1234567890 --out /absolute/path/smoke-report.json
 ```
 
@@ -92,15 +92,15 @@ The report lists each tool as `ok`, `error` (with `forbidden` meaning the key's 
 Claude Code:
 
 ```sh
-claude mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.19.4 serve
+claude mcp add apple-connect -s user -e APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
+  npx -y apple-connect-workflows-mcp@0.19.5 serve
 ```
 
 Codex CLI:
 
 ```sh
 codex mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.19.4 serve
+  npx -y apple-connect-workflows-mcp@0.19.5 serve
 ```
 
 Clients that use a JSON config:
@@ -110,7 +110,7 @@ Clients that use a JSON config:
   "mcpServers": {
     "apple-connect": {
       "command": "npx",
-      "args": ["-y", "apple-connect-workflows-mcp@0.19.4", "serve"],
+      "args": ["-y", "apple-connect-workflows-mcp@0.19.5", "serve"],
       "env": { "APPLE_CONNECT_CONFIG": "/absolute/path/config.json" }
     }
   }
@@ -145,7 +145,7 @@ Keep the other account fields. Set `"readOnly": true` to block all writes, `"gen
 From the terminal, run the command directly; anything that changes prices, availability or many items at once previews first and writes only with `--execute`:
 
 ```sh
-apple-connect-mcp version-localize --account main --app 1234567890 \
+npx -y apple-connect-workflows-mcp@0.19.5 version-localize --config "$HOME/.apple-connect-mcp/config.json" --account main --app 1234567890 \
   --version VERSION_ID --locale en-US --whats-new "Bug fixes."
 ```
 
@@ -154,9 +154,9 @@ From an MCP client, ask in plain words, for example "set the What's New text for
 To require a terminal step instead, set `"mcpApply": false` on the account; the assistant then gives you a command to run:
 
 ```sh
-apple-connect-mcp workflow-apply --plan PLAN_ID --digest DIGEST
+npx -y apple-connect-workflows-mcp@0.19.5 workflow-apply --config "$HOME/.apple-connect-mcp/config.json" --plan PLAN_ID --digest DIGEST
 ```
 
 See [Safety model](safety.md#plans-and-digests).
 
-For every command, run `apple-connect-mcp help` or read [CLI command reference](commands.md). To go from an empty app record to a live release, follow the [release checklist](release-checklist.md).
+For every command, run `npx -y apple-connect-workflows-mcp@0.19.5 help` or read [CLI command reference](commands.md). To go from an empty app record to a live release, follow the [release checklist](release-checklist.md).

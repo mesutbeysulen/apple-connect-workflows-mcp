@@ -6,12 +6,12 @@
     "url": "https://github.com/mesutbeysulen/apple-connect-workflows-mcp",
     "source": "github"
   },
-  "version": "0.19.4",
+  "version": "0.19.5",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "apple-connect-workflows-mcp",
-      "version": "0.19.4",
+      "version": "0.19.5",
       "transport": {
         "type": "stdio"
       },

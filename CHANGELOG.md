@@ -2,6 +2,12 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/); while the version is below 1.0, a minor release may contain breaking changes, which are marked **Breaking**.
 
+## 0.19.5 — 2026-11-24
+
+### Changed
+- Rewrote the README around direct npm setup, Codex and Claude Code registration, first tasks, and troubleshooting.
+- Made the getting-started commands directly runnable from the published package.
+
 ## 0.19.4 — 2026-11-22
 
 ### Changed

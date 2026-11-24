@@ -2,104 +2,101 @@
 
 [![npm version](https://img.shields.io/npm/v/apple-connect-workflows-mcp)](https://www.npmjs.com/package/apple-connect-workflows-mcp)
 [![CI](https://github.com/mesutbeysulen/apple-connect-workflows-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mesutbeysulen/apple-connect-workflows-mcp/actions/workflows/ci.yml)
-[![GitHub stars](https://img.shields.io/github/stars/mesutbeysulen/apple-connect-workflows-mcp)](https://github.com/mesutbeysulen/apple-connect-workflows-mcp/stargazers)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D24-brightgreen.svg)](https://nodejs.org/)
 
-A local [Model Context Protocol](https://modelcontextprotocol.io/) server and CLI for preparing and shipping apps and games through App Store Connect, from Claude, Codex or any MCP client. It covers the release path end to end: app information, screenshots, builds, TestFlight, App Review, release, in-app purchases, marketing, Game Center, Xcode Cloud, team and signing, and reports.
+Manage App Store Connect from an AI assistant. This local MCP server can work with app metadata, screenshots, builds, TestFlight, App Review, releases, in-app purchases, Game Center, Xcode Cloud, and more. It also includes a CLI for the same workflows.
 
-It runs over stdio, keeps API keys on your machine, and stores plans and journals in a local SQLite database. New accounts can write to every app the Apple key can access, including catalog endpoints without a dedicated command. You can restrict that access in the local config. It is not affiliated with Apple.
+**You do not need to clone this repository or install the package globally.** Your MCP client runs the published npm package with `npx`. The Apple API key and operation history stay on your computer.
 
-**Give this line to your AI assistant to install and configure it:**
+## Let your assistant set it up
+
+Paste this into Codex or Claude Code:
 
 ```text
-https://github.com/mesutbeysulen/apple-connect-workflows-mcp — install this MCP server for me and follow AGENTS.md.
+Install https://github.com/mesutbeysulen/apple-connect-workflows-mcp for me. Follow its AGENTS.md. Use the published npm package, ask me only for the path to my App Store Connect .p8 key and any missing key details, then verify the MCP connection.
 ```
 
-## Quick start
+If you prefer to set it up yourself, follow the three steps below.
 
-Node.js 24 or newer. Pass the path to your `.p8` key, never its contents:
+## Manual setup
+
+### 1. Prepare an Apple API key
+
+You need [Node.js 24 or newer](https://nodejs.org/) and an [App Store Connect API key](https://developer.apple.com/documentation/appstoreconnectapi/creating-api-keys-for-app-store-connect-api). Download the `.p8` file from Apple. For a **team key**, also copy its Issuer ID. An **individual key** does not have an Issuer ID.
+
+Keep the `.p8` file on your computer. Pass its **file path**, never its contents, to `key-setup`:
 
 ```sh
-npx -y apple-connect-workflows-mcp@0.19.4 key-setup \
+npx -y apple-connect-workflows-mcp@0.19.5 key-setup \
   --config "$HOME/.apple-connect-mcp/config.json" \
-  --name main --issuer YOUR_ISSUER_UUID \
+  --name main \
+  --issuer YOUR_ISSUER_ID \
   --p8 /absolute/path/AuthKey_ABCDEFGHIJ.p8
-
-npx -y apple-connect-workflows-mcp@0.19.4 doctor --config "$HOME/.apple-connect-mcp/config.json"
 ```
 
-Register it with Claude Code (for Codex CLI, use `codex mcp add` with the same arguments):
+For an individual key, replace `--issuer YOUR_ISSUER_ID` with `--individual`. If the filename does not contain the Key ID, add `--key-id YOUR_KEY_ID`. `key-setup` copies the key to a private local directory and creates the config file. It does not change anything in App Store Connect.
+
+Check that Apple accepts the key:
 
 ```sh
-claude mcp add apple-connect --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
-  npx -y apple-connect-workflows-mcp@0.19.4 serve
+npx -y apple-connect-workflows-mcp@0.19.5 doctor \
+  --config "$HOME/.apple-connect-mcp/config.json"
 ```
 
-For individual keys, other clients, source installs and enabling writes, see [Getting started](docs/getting-started.md).
+`doctor` checks basic read access. Other operations still depend on the key's Apple role and the app's state.
 
-## Documentation
+### 2. Connect your MCP client
 
-| Guide | What it covers |
-| --- | --- |
-| [Getting started](docs/getting-started.md) | Install, API key, config fields, client registration, first reads, enabling writes |
-| [Release checklist](docs/release-checklist.md) | Every step from a new app record to a live version, with the command for each |
-| [Safety model](docs/safety.md) | Read-only defaults, previews, reviewed plans, secrets, operator policy, irreversible actions |
-| [CLI command reference](docs/commands.md) | All commands by topic (also `apple-connect-mcp help <topic>`) |
-| [MCP tools](docs/mcp-tools.md) | Every tool the server exposes, with read-only hints |
-| [Changelog](CHANGELOG.md) | Changes per release, including breaking ones |
-| [AGENTS.md](AGENTS.md) | Instructions an assistant follows to install the server for you |
-| [Security policy](SECURITY.md) | How to report a vulnerability privately |
-
-## What it supports
-
-| Area | Examples |
-| --- | --- |
-| Apps and versions | App information, categories, age rating, availability, version text, review details, export compliance |
-| Media | Asset Library screenshots, app previews, Header and Search Results images; interrupted uploads resume |
-| Builds and TestFlight | Upload IPA/PKG files, wait for processing, beta groups and testers, Beta App Review |
-| App Review and release | Readiness report, submission, phased release, manual release, customer review replies |
-| Commerce | In-app purchases, subscriptions, prices, territories, introductory, promotional and win-back offers, offer codes, promoted purchases, retention messages, sandbox testers |
-| Marketing | Custom Product Pages, in-app events, product page A/B tests |
-| Game Center | Leaderboards, sets, achievements, activities and challenges on Apple's versioned model; groups and matchmaking |
-| Xcode Cloud | Start builds, wait for results with failing tests, download artifacts |
-| Team and signing | Team members, devices, App ID capabilities, certificates from your own CSR, provisioning profiles |
-| Listing extras | License agreement, accessibility labels, routing coverage, App Clips, background assets, EU alternative distribution |
-| Reports and webhooks | Sales, finance and analytics reports; webhooks and a local receiver |
-| Anything else | Search Apple's API catalog, read any GET endpoint, and run reviewed, schema-checked writes |
-
-## How writes stay safe
-
-- New accounts allow writes to every app the Apple key can access, including generic API writes. Use `--allow-app ID1,ID2` in `key-setup`, or set `readOnly`, `allowedAppIds`, `genericWrites`, and `mcpApply` in the config to narrow access.
-- Commands check that every ID belongs to the named app before writing.
-- Price, availability, team, signing and bulk changes preview first and write only with `--execute`.
-- From an MCP client, every change is a saved plan with a SHA-256 digest that runs once. An explicit request to make a change authorizes the matching plan; the assistant does not ask you to approve it twice. Your MCP client may still prompt before a destructive tool call. Set `mcpApply: false` on an account to require running plans in a terminal instead.
-
-Details and limits are in the [safety model](docs/safety.md).
-
-## Status
-
-Every request the commands send is checked in tests against Apple's App Store Connect API 4.6 OpenAPI schema, and the MCP server is tested over a real stdio session. Read tools have been run against a live account with `smoke-read` (67 of 71 returned real data, none failed), and the core release-preparation writes (text, metadata sync, App Review and TestFlight details, beta groups, build attachment, screenshot upload, and the MCP plan-and-apply path), Custom Product Pages, in-app events, webhooks, sandbox testers, App IDs, capabilities, provisioning profiles, certificates, A/B test setup, in-app purchases, subscriptions, offers and Game Center items. Submission, release, team and Xcode Cloud writes are not yet verified live; see the [safety model](docs/safety.md#what-has-and-has-not-been-verified). Run `smoke-read` on your account, then try writes on a test app.
-
-Not covered: creating the app record, App Privacy answers and agreements (no API; `submission_manual_steps` links to them), Keychain storage of keys, and remote multi-user hosting.
-
-## Development
+**Codex:**
 
 ```sh
-npm ci
-npm run check
-npm test
-npm run docs   # regenerate docs/commands.md and docs/mcp-tools.md after changing help or tools
+codex mcp add apple-connect \
+  --env APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
+  npx -y apple-connect-workflows-mcp@0.19.5 serve
 ```
 
-CI runs on Node.js 24 and 26. To regenerate the API catalog from an Apple OpenAPI document, run `npm run catalog -- /absolute/path/to/openapi.oas.json`. Command help lives in `src/help.ts`; tests fail if a command is missing from it or the generated docs are stale.
+**Claude Code:**
 
-### Releasing
+```sh
+claude mcp add apple-connect -s user \
+  -e APPLE_CONNECT_CONFIG="$HOME/.apple-connect-mcp/config.json" -- \
+  npx -y apple-connect-workflows-mcp@0.19.5 serve
+```
 
-Add a section to `CHANGELOG.md`, bump `version` in `package.json`, both versions in `server.json`, and the pinned version in `README.md`, `AGENTS.md` and `docs/getting-started.md`, then push to `main`. The Release workflow runs only when npm does not have that version yet: it runs the checks and tests, publishes to npm, creates the `v<version>` tag and a GitHub release, and lists the version in the [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.mesutbeysulen/apple-connect-workflows-mcp`.
+Restart the client if it was already open. To check the registration, run `codex mcp get apple-connect` or `claude mcp get apple-connect`. For Claude Desktop and other JSON-based clients, see [Getting started](docs/getting-started.md#3-connect-an-mcp-client).
 
-Publishing uses npm trusted publishing with provenance for the workflow `release.yml`. If an `NPM_TOKEN` repository secret exists, the workflow publishes with that token instead and skips provenance.
+### 3. Ask for a task
+
+Try these in your MCP client:
+
+```text
+List the apps in my App Store Connect account.
+Show what is missing before I submit my app for review.
+Upload /absolute/path/MyApp.ipa for app 1234567890 as version 1.0.0, build 10, and wait for TestFlight processing.
+```
+
+The assistant discovers the required app and version IDs, prepares write operations, and runs a plan that matches your request. Your MCP client may show its own approval prompt for a write.
+
+## Access and limits
+
+- A new account can write to every app its Apple key can access. To limit writes to specific apps during setup, add `--allow-app 1234567890,0987654321`. To make an existing account read-only or limit other writes, edit [the local config](docs/getting-started.md#5-restrict-changes-optional).
+- The MCP can use dedicated workflows and reviewed writes from its bundled Apple API catalog. It cannot grant permissions that the Apple API key does not have.
+- Some steps are still manual with this MCP: creating the App Store Connect app record, completing App Privacy answers, and accepting agreements. See the [release checklist](docs/release-checklist.md) for the full path.
+- The package version in the commands above is pinned. Restarting your MCP client reloads that version; it does not automatically upgrade to a future release.
+
+For the complete command list, see [CLI commands](docs/commands.md) or [MCP tools](docs/mcp-tools.md). The [safety model](docs/safety.md) explains plans, retries, and local permissions. Changes between releases are in the [changelog](CHANGELOG.md).
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| `doctor` cannot read apps | Confirm the Issuer ID (team keys), Key ID, `.p8` path, and the key's Apple role. |
+| The assistant cannot see the MCP | Restart the MCP client and check `codex mcp get apple-connect` or `claude mcp get apple-connect`. |
+| A build upload lost its local journal | Ask the assistant to retry the upload with the same app, version, build number, and IPA. The pending Apple upload is reused. |
+| Apple rejects a write | Read the returned Apple error. Some actions require a different API role, an editable app state, or a manual App Store Connect step. |
+
+For more detail, use [Getting started](docs/getting-started.md), the [release checklist](docs/release-checklist.md), or [open an issue](https://github.com/mesutbeysulen/apple-connect-workflows-mcp/issues).
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE). This project is not affiliated with Apple.
